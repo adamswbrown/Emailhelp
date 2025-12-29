@@ -1,0 +1,16 @@
+# macOS Apple Mail Accounting CLI - Dependencies
+#
+# This tool has minimal dependencies - uses only Python standard library
+# for deterministic, transparent operation.
+#
+# Python 3.7+ required
+#
+# Standard library modules used:
+# - sqlite3 (built-in)
+# - email (built-in)
+# - argparse (built-in)
+# - pathlib (built-in)
+# - re (built-in)
+# - datetime (built-in)
+#
+# No external packages required for core functionality.
