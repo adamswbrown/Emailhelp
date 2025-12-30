@@ -136,8 +136,9 @@ def main():
         # Initialize scorer
         scorer = EmailScorer(user_name=args.user_name)
         
-        # Process emails (extract preview only if --why is used)
-        processed = process_emails(messages, scorer, show_preview=args.why)
+        # Process emails (extract preview for better scoring accuracy)
+        # Always extract preview to detect informational patterns in content
+        processed = process_emails(messages, scorer, show_preview=True)
         
         # Filter by category if requested
         if args.category:

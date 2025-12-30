@@ -95,6 +95,31 @@ class EmailScorer:
         'system notification',
     ]
     
+    # Informational/license expiration patterns (reduce score - these are FYI, not action)
+    INFORMATIONAL_PATTERNS = [
+        'license will expire',
+        'licence will expire',
+        'license expires',
+        'licence expires',
+        'license expiration',
+        'licence expiration',
+        'your access will expire',
+        'your access expires',
+        'expires soon',
+        'will expire soon',
+        'renewal plan',
+        'renew your license',
+        'renew your licence',
+        'purchase a license',
+        'purchase a licence',
+        'before your access',
+        'before your data is removed',
+        'your data will be removed',
+        'your instance will be deleted',
+        'complimentary access',
+        'free access',
+    ]
+    
     # Unsubscribe indicators (strong signal of bulk email)
     UNSUBSCRIBE_PATTERNS = [
         'unsubscribe',
@@ -145,6 +170,39 @@ class EmailScorer:
         
         # Subject signals
         subject_score = self._score_subject(subject, signals)
+        
+        # Check subject for informational patterns (license expiration, etc.)
+        # These often have "ACTION REQUIRED" but are actually FYI (not ACTION, not IGNORE)
+        subject_lower = subject.lower()
+        informational_in_subject = False
+        for pattern in self.INFORMATIONAL_PATTERNS:
+            if pattern in subject_lower:
+                informational_in_subject = True
+                # Reduce "ACTION REQUIRED" score if it's informational
+                # Reduce enough to move from ACTION (65) to FYI range (30-59)
+                if 'action_required' in signals:
+                    # This is likely a license expiration notice, not truly requiring action
+                    # Reduce by 15 to get score ~50 (FYI range)
+                    signals['informational_action_required'] = -15
+                    subject_score -= 15
+                break
+        
+        # Also check for common license expiration phrases in subject
+        license_expiration_keywords = [
+            'purchase a license',
+            'purchase a licence',
+            'before your access',
+            'before your data',
+            'expires soon',
+            'will expire',
+        ]
+        for keyword in license_expiration_keywords:
+            if keyword in subject_lower:
+                informational_in_subject = True
+                if 'action_required' in signals:
+                    signals['informational_action_required'] = -15
+                    subject_score -= 15
+                break
         
         # Content signals
         content_score = 0
@@ -209,6 +267,7 @@ class EmailScorer:
         Signals:
         - Contains '?': +15 (question, likely needs response)
         - Starts with 'RE:': +10 (part of conversation)
+        - Meeting/call request: +25 (requires scheduling/response)
         - Contains newsletter/digest: -20 (bulk content)
         
         Args:
@@ -220,6 +279,48 @@ class EmailScorer:
         """
         score = 0
         subject_lower = subject.lower()
+        
+        # Explicit action required phrases (highest priority)
+        action_required_patterns = [
+            'action required',
+            'action needed',
+            'requires action',
+            'urgent action',
+            'immediate action',
+        ]
+        for pattern in action_required_patterns:
+            if pattern in subject_lower:
+                signals['action_required'] = 35
+                score += 35
+                break  # Only count once
+        
+        # Meeting/call/scheduling requests (high priority - requires action)
+        # These are strong action indicators that need responses
+        meeting_patterns = [
+            'availability for',
+            'availability',
+            'meeting request',
+            'schedule a call',
+            'schedule a meeting',
+            'can we schedule',
+            'when are you available',
+            'book a call',
+            'book a meeting',
+            'set up a call',
+            'set up a meeting',
+        ]
+        for pattern in meeting_patterns:
+            if pattern in subject_lower:
+                signals['meeting_request'] = 30
+                score += 30
+                break  # Only count once
+        
+        # General meeting/call keywords (less specific, lower score)
+        if 'meeting' in subject_lower or 'call' in subject_lower:
+            # Only add if we didn't already match a specific pattern above
+            if 'meeting_request' not in signals and 'action_required' not in signals:
+                signals['meeting_mention'] = 15
+                score += 15
         
         # Question mark indicates query/action needed
         if '?' in subject:
@@ -248,6 +349,7 @@ class EmailScorer:
         - Contains action phrases: +20
         - Mentions user name: +15
         - Contains 'unsubscribe': -40 (strong bulk indicator)
+        - Informational/license expiration: -25 (FYI, not action)
         
         Args:
             preview: Body preview text
@@ -258,6 +360,15 @@ class EmailScorer:
         """
         score = 0
         preview_lower = preview.lower()
+        
+        # Check for informational/license expiration patterns (reduce score)
+        # These are typically FYI messages, not requiring action from recipient
+        # Reduce by 15 to move from ACTION to FYI range, but not too much
+        for pattern in self.INFORMATIONAL_PATTERNS:
+            if pattern in preview_lower:
+                signals['informational_notice'] = -15
+                score -= 15
+                break  # Only count once
         
         # Check for action-indicating phrases
         for phrase in self.ACTION_PHRASES:
