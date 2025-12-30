@@ -1,0 +1,380 @@
+#!/usr/bin/env python3
+"""
+main_app.py - Native macOS Email Triage Application
+
+A native macOS window application for email triage and categorization.
+Uses PyWebView for native window with HTML/CSS/JS UI.
+
+Features:
+- Native macOS window (not a browser)
+- Direct database access to Mail.app/Outlook
+- Compose and send replies
+- GPT integration for drafting
+- Auto-refresh for new emails
+- Mark emails as done
+"""
+
+import webview
+import json
+import sys
+from pathlib import Path
+from datetime import datetime
+from typing import List, Dict, Optional
+
+# Import our existing modules
+from email_reader import create_reader
+from scoring import EmailScorer
+from classifier import EmailClassifier
+from preview import EmailPreview
+from reply_handler import ReplyHandler
+from actions.gpt_export import GPTExporter
+from actions.mark_done import DoneTracker
+
+
+class EmailTriageAPI:
+    """Backend API for the email triage application."""
+    
+    def __init__(self, client='auto', account='Exchange'):
+        """
+        Initialize the API.
+        
+        Args:
+            client: Email client ('auto', 'apple-mail', or 'outlook')
+            account: Default account to filter
+        """
+        self.client = client
+        self.account = account
+        self.reader = None
+        self.scorer = EmailScorer()
+        self.classifier = EmailClassifier()
+        self.done_tracker = DoneTracker()
+        self.reply_handler = None
+        
+        # Initialize reader
+        try:
+            self.reader = create_reader(client=client if client != 'auto' else None)
+            
+            # Determine which client we're using for reply handler
+            detected_client = 'apple-mail'
+            if hasattr(self.reader, '__class__'):
+                class_name = self.reader.__class__.__name__
+                if 'Outlook' in class_name:
+                    detected_client = 'outlook'
+            
+            self.reply_handler = ReplyHandler(client=detected_client)
+            
+        except Exception as e:
+            print(f"Error initializing reader: {e}", file=sys.stderr)
+            raise
+    
+    def get_emails(self, account: str = None, limit: int = 50, since_days: int = 7, category_filter: str = None):
+        """
+        Get categorized emails.
+        
+        Args:
+            account: Account to filter (default: self.account)
+            limit: Maximum number of emails
+            since_days: Days to look back
+            category_filter: Filter by category (ACTION, FYI, IGNORE)
+        
+        Returns:
+            JSON string of email list
+        """
+        try:
+            if account is None:
+                account = self.account
+            
+            with self.reader:
+                messages = self.reader.query_messages(
+                    account=account,
+                    limit=limit,
+                    since_days=since_days
+                )
+            
+            # Process and categorize
+            emails = []
+            for msg in messages:
+                # Get email ID
+                email_id = msg.get('message_id') or msg.get('ROWID')
+                
+                # Skip if marked as done
+                if self.done_tracker.is_done(email_id):
+                    continue
+                
+                # Extract fields
+                sender = msg.get('sender', '') or ''
+                subject = msg.get('subject', '') or ''
+                preview = msg.get('preview', '')
+                
+                # Score email
+                score, signals = self.scorer.score_email(sender, subject, preview)
+                
+                # Classify
+                category = self.classifier.classify(score).value
+                
+                # Filter by category if requested
+                if category_filter and category != category_filter:
+                    continue
+                
+                # Format date
+                date_received = msg.get('date_received', 0)
+                if date_received:
+                    date_obj = datetime.fromtimestamp(date_received)
+                    date_str = date_obj.strftime('%d/%m/%Y %H:%M')
+                    time_ago = self._format_time_ago(date_received)
+                else:
+                    date_str = 'Unknown'
+                    time_ago = ''
+                
+                emails.append({
+                    'id': email_id,
+                    'from': sender,
+                    'subject': subject,
+                    'date': date_received,
+                    'date_str': date_str,
+                    'time_ago': time_ago,
+                    'score': score,
+                    'category': category,
+                    'signals': signals,
+                    'preview': preview[:200] if preview else 'No preview available',
+                    'mailbox': msg.get('mailbox', ''),
+                    'read': msg.get('read', 1) == 1
+                })
+            
+            # Sort by date (newest first)
+            emails.sort(key=lambda x: x['date'], reverse=True)
+            
+            return json.dumps(emails)
+            
+        except Exception as e:
+            print(f"Error getting emails: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
+            return json.dumps([])
+    
+    def _format_time_ago(self, timestamp: int) -> str:
+        """Format timestamp as 'X hours ago' etc."""
+        now = datetime.now().timestamp()
+        diff = now - timestamp
+        
+        if diff < 3600:
+            mins = int(diff / 60)
+            return f"{mins} min{'s' if mins != 1 else ''} ago"
+        elif diff < 86400:
+            hours = int(diff / 3600)
+            return f"{hours} hour{'s' if hours != 1 else ''} ago"
+        else:
+            days = int(diff / 86400)
+            return f"{days} day{'s' if days != 1 else ''} ago"
+    
+    def send_reply(self, email_id: str, reply_body: str, reply_all: bool = False):
+        """
+        Send a reply to an email.
+        
+        Args:
+            email_id: Email ID
+            reply_body: Reply text
+            reply_all: Whether to reply all
+        
+        Returns:
+            JSON result
+        """
+        try:
+            # Get email details
+            email = self._get_email_by_id(email_id)
+            if not email:
+                return json.dumps({
+                    "success": False,
+                    "message": "Email not found"
+                })
+            
+            # Send reply
+            result = self.reply_handler.send_reply(email, reply_body, reply_all)
+            
+            # Mark as done if successful
+            if result['success']:
+                self.done_tracker.mark_done(email_id)
+            
+            return json.dumps(result)
+            
+        except Exception as e:
+            return json.dumps({
+                "success": False,
+                "message": f"Error sending reply: {str(e)}"
+            })
+    
+    def open_reply_window(self, email_id: str, reply_body: str = ""):
+        """
+        Open reply window in Mail.app/Outlook.
+        
+        Args:
+            email_id: Email ID
+            reply_body: Pre-filled body text
+        
+        Returns:
+            JSON result
+        """
+        try:
+            email = self._get_email_by_id(email_id)
+            if not email:
+                return json.dumps({
+                    "success": False,
+                    "message": "Email not found"
+                })
+            
+            result = self.reply_handler.open_reply_window(email, reply_body)
+            return json.dumps(result)
+            
+        except Exception as e:
+            return json.dumps({
+                "success": False,
+                "message": f"Error opening reply window: {str(e)}"
+            })
+    
+    def _get_email_by_id(self, email_id: str) -> Optional[Dict]:
+        """Get email details by ID."""
+        try:
+            with self.reader:
+                messages = self.reader.query_messages(limit=1000)
+            
+            for msg in messages:
+                msg_id = str(msg.get('message_id') or msg.get('ROWID'))
+                if msg_id == str(email_id):
+                    return {
+                        'sender': msg.get('sender', ''),
+                        'subject': msg.get('subject', ''),
+                        'date': msg.get('date_received', 0),
+                        'content': msg.get('preview', ''),
+                        'cc': msg.get('cc', '')
+                    }
+            
+            return None
+            
+        except Exception as e:
+            print(f"Error getting email by ID: {e}", file=sys.stderr)
+            return None
+    
+    def export_to_gpt(self, email_id: str, for_draft: bool = False):
+        """
+        Export email to clipboard for GPT.
+        
+        Args:
+            email_id: Email ID
+            for_draft: Whether to format for draft reply request
+        
+        Returns:
+            JSON result
+        """
+        try:
+            # Get full email details
+            emails_json = self.get_emails(limit=1000)
+            emails = json.loads(emails_json)
+            
+            email = next((e for e in emails if str(e['id']) == str(email_id)), None)
+            if not email:
+                return json.dumps({
+                    "success": False,
+                    "message": "Email not found"
+                })
+            
+            # Format for GPT
+            if for_draft:
+                context = GPTExporter.export_for_draft_reply(email)
+            else:
+                context = GPTExporter.export_for_analysis(email)
+            
+            # Copy to clipboard
+            if GPTExporter.copy_to_clipboard(context):
+                return json.dumps({
+                    "success": True,
+                    "message": "Copied to clipboard! Paste into ChatGPT."
+                })
+            else:
+                return json.dumps({
+                    "success": False,
+                    "message": "Failed to copy to clipboard"
+                })
+            
+        except Exception as e:
+            return json.dumps({
+                "success": False,
+                "message": f"Error exporting to GPT: {str(e)}"
+            })
+    
+    def mark_done(self, email_id: str):
+        """Mark email as done."""
+        try:
+            self.done_tracker.mark_done(email_id)
+            return json.dumps({"success": True})
+        except Exception as e:
+            return json.dumps({
+                "success": False,
+                "message": str(e)
+            })
+    
+    def mark_undone(self, email_id: str):
+        """Unmark email as done."""
+        try:
+            self.done_tracker.mark_undone(email_id)
+            return json.dumps({"success": True})
+        except Exception as e:
+            return json.dumps({
+                "success": False,
+                "message": str(e)
+            })
+    
+    def get_templates(self):
+        """Get quick reply templates."""
+        templates = self.reply_handler.get_templates()
+        return json.dumps(templates)
+    
+    def get_template_body(self, template_id: str):
+        """Get body for a specific template."""
+        body = self.reply_handler.get_template_body(template_id)
+        return json.dumps({"body": body if body else ""})
+
+
+def main():
+    """Start the native macOS application."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Email Triage Native App')
+    parser.add_argument('--client', choices=['auto', 'apple-mail', 'outlook'], default='auto',
+                        help='Email client to use')
+    parser.add_argument('--account', default='Exchange',
+                        help='Default account to filter')
+    
+    args = parser.parse_args()
+    
+    # Initialize API
+    try:
+        api = EmailTriageAPI(client=args.client, account=args.account)
+    except Exception as e:
+        print(f"Failed to initialize: {e}", file=sys.stderr)
+        sys.exit(1)
+    
+    # Get UI path
+    ui_path = Path(__file__).parent / 'ui' / 'dashboard.html'
+    
+    if not ui_path.exists():
+        print(f"Error: UI file not found at {ui_path}", file=sys.stderr)
+        sys.exit(1)
+    
+    # Create window
+    window = webview.create_window(
+        'Email Triage',
+        str(ui_path),
+        js_api=api,
+        width=1400,
+        height=900,
+        resizable=True,
+        frameless=False,
+        easy_drag=True
+    )
+    
+    # Start app
+    webview.start(debug=True)
+
+
+if __name__ == '__main__':
+    main()
