@@ -89,6 +89,24 @@ def main():
     parser = CLI.create_parser()
     args = parser.parse_args()
     
+    # Launch UI if requested
+    if args.ui:
+        try:
+            from ui import EmailAccountingApp
+            client = None if args.client == 'auto' else args.client
+            app = EmailAccountingApp(client=client, account=args.account, user_name=args.user_name)
+            app.run()
+            return 0
+        except ImportError:
+            print("Error: textual package is required for UI mode.", file=sys.stderr)
+            print("Install it with: pip install textual", file=sys.stderr)
+            return 1
+        except Exception as e:
+            print(f"Error launching UI: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            return 1
+    
     try:
         # Initialize email reader (supports both Apple Mail and Outlook)
         client_name = args.client if args.client != 'auto' else None

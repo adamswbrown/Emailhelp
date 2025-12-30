@@ -14,3 +14,6 @@
 # - datetime (built-in)
 #
 # No external packages required for core functionality.
+#
+# Optional: Textual for TUI interface
+textual>=0.40.0

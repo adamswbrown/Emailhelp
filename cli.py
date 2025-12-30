@@ -55,6 +55,12 @@ Examples:
   
   # Open email in Outlook instead
   python main.py --limit 10 --open 3 --open-client outlook
+  
+  # Launch interactive TUI
+  python main.py --ui
+  
+  # Launch TUI with specific client/account
+  python main.py --ui --client apple-mail --account Exchange
             """
         )
         
@@ -154,6 +160,12 @@ Examples:
             choices=['apple-mail', 'outlook'],
             default='apple-mail',
             help='Email client to use for --open (default: apple-mail)'
+        )
+        
+        parser.add_argument(
+            '--ui',
+            action='store_true',
+            help='Launch interactive TUI (Textual-based interface)'
         )
         
         return parser

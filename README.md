@@ -37,6 +37,12 @@ python3 main.py --limit 10 --open 3 --open-client outlook
 # Analyze your email patterns (supports both Apple Mail and Outlook)
 python3 analyze_emails.py --client apple-mail --since 30
 python3 analyze_emails.py --client outlook --all
+
+# Launch interactive TUI (Textual-based interface)
+python3 main.py --ui
+
+# Launch TUI with specific client/account
+python3 main.py --ui --client apple-mail --account Exchange
 ```
 
 ## Table of Contents
