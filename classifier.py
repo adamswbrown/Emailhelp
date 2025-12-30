@@ -5,13 +5,17 @@ CLASSIFICATION RULES:
 Maps weighted signal scores (0-100) to actionable categories.
 
 CATEGORIES:
-- ACTION:  Score >= 60  - Requires immediate attention/response
-- FYI:     Score 30-59  - Informational, may need review
-- IGNORE:  Score < 30   - Bulk/automated, can be safely ignored
+- ACTION:  Score >= 30  - Requires immediate attention/response
+- FYI:     Score 20-29  - Informational, may need review
+- IGNORE:  Score < 20   - Bulk/automated, can be safely ignored
 
 DETERMINISM:
 All classification is rule-based and deterministic.
 Same input always produces same output.
+
+RECENT CHANGES:
+- 2025-12-30: Lowered ACTION threshold from 40 to 30 based on 60-day email analysis
+  (Only 2.2% emails were classified as ACTION with threshold=40)
 """
 
 from enum import Enum
@@ -29,8 +33,10 @@ class EmailClassifier:
     """Classify emails based on weighted signal scores."""
     
     # Classification thresholds
-    ACTION_THRESHOLD = 40
-    FYI_THRESHOLD = 30
+    # Updated 2025-12-30: Lowered from 40 to 30 based on email analysis
+    # Analysis showed only 2.2% classified as ACTION with threshold=40
+    ACTION_THRESHOLD = 30
+    FYI_THRESHOLD = 20
     
     @staticmethod
     def classify(score: int) -> EmailCategory:

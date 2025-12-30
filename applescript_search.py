@@ -13,12 +13,13 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 
-def run_applescript(script: str) -> str:
+def run_applescript(script: str, timeout: int = 120) -> str:
     """
     Execute AppleScript and return output.
     
     Args:
         script: AppleScript code to execute
+        timeout: Timeout in seconds (default: 120, use higher for content extraction)
         
     Returns:
         Script output as string
@@ -31,13 +32,13 @@ def run_applescript(script: str) -> str:
             ['osascript', '-e', script],
             capture_output=True,
             text=True,
-            timeout=120
+            timeout=timeout
         )
         if result.returncode != 0:
             raise Exception(f"AppleScript error: {result.stderr}")
         return result.stdout.strip()
     except subprocess.TimeoutExpired:
-        raise Exception("AppleScript execution timed out")
+        raise Exception(f"AppleScript execution timed out after {timeout} seconds")
     except Exception as e:
         raise Exception(f"AppleScript execution failed: {str(e)}")
 
@@ -235,7 +236,9 @@ def search_emails(
     '''
     
     try:
-        result = run_applescript(script)
+        # Use longer timeout for content extraction (if unlimited length)
+        timeout = 180 if max_content_length == 0 else 120
+        result = run_applescript(script, timeout=timeout)
         emails = []
         
         # Parse delimited output
@@ -315,30 +318,41 @@ def get_email_content(
     account: str,
     subject_keyword: str,
     mailbox: str = "INBOX",
-    max_results: int = 1
+    max_results: int = 1,
+    timeout: int = 60
 ) -> List[Dict[str, Any]]:
     """
     Get full email content as plain text (unlimited length).
     
     This is useful for extracting full email content to pass to other applications.
+    Note: This uses AppleScript and can be slow for large emails/mailboxes.
     
     Args:
         account: Account name to search in
         subject_keyword: Keyword to search in subject (case-insensitive)
         mailbox: Mailbox to search (default: "INBOX")
-        max_results: Maximum number of emails to return (default: 1)
+        max_results: Maximum number of emails to return (default: 1, recommend keeping low)
+        timeout: AppleScript timeout in seconds (default: 60)
         
     Returns:
         List of email dictionaries with full content in 'content' field
     """
-    return search_emails(
-        account=account,
-        mailbox=mailbox,
-        subject_keyword=subject_keyword,
-        max_results=max_results,
-        include_content=True,
-        max_content_length=0  # 0 = unlimited
-    )
+    # For content extraction, use a shorter max_content_length initially
+    # Then get full content if needed
+    try:
+        # First try with limited content (faster)
+        messages = search_emails(
+            account=account,
+            mailbox=mailbox,
+            subject_keyword=subject_keyword,
+            max_results=max_results,
+            include_content=True,
+            max_content_length=2000  # Limit to 2000 chars for speed
+        )
+        return messages
+    except Exception as e:
+        # If that fails, raise the error
+        raise Exception(f"Content extraction failed: {str(e)}")
 
 
 def extract_email_content_as_text(

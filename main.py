@@ -38,6 +38,7 @@ from applescript_search import (
     get_email_content,
     extract_email_content_as_text
 )
+from fast_content_extract import get_email_content_by_details
 
 
 def process_emails(
@@ -379,6 +380,7 @@ def main():
             
             email_to_copy = processed[args.copy_index - 1]
             subject = email_to_copy.get('subject', '')
+            sender = email_to_copy.get('sender', '')
             
             # Determine account - try multiple sources
             account = email_to_copy.get('account', '')
@@ -441,98 +443,82 @@ def main():
                 return 1
             
             print(f"\nExtracting content for email #{args.copy_index}: {subject[:50]}...", file=sys.stderr)
-            print(f"Using account: {account}", file=sys.stderr)
+            print(f"Using account: {account}, sender: {sender[:30]}", file=sys.stderr)
             
             try:
-                # Use AppleScript to get full content
-                from applescript_search import get_email_content
-                
                 # Extract mailbox name from URL if needed
                 mailbox_name = "INBOX"  # Default to INBOX
                 if '://' in mailbox:
-                    # Try to extract mailbox name from URL if possible
-                    # For now, default to INBOX
+                    # Default to INBOX for URL-based mailboxes
                     mailbox_name = "INBOX"
                 else:
                     mailbox_name = mailbox
                 
-                # Search for the email by subject to get full content
-                # Clean subject for better matching (remove brackets, external tags, etc.)
-                clean_subject = subject.replace('[External]', '').replace('[', '').replace(']', '').strip()
-                subject_words = clean_subject.split()
+                # Use fast, targeted extraction (subject + sender)
+                # This is much faster than keyword search
+                print(f"Extracting content using targeted search (subject + sender)...", file=sys.stderr)
                 
-                # Use a meaningful keyword - prefer words that are likely unique
-                # Skip common words like "Availability", "for", "a"
-                skip_words = {'for', 'a', 'an', 'the', 'of', 'in', 'on', 'at', 'to', 'with'}
-                search_keyword = None
-                for word in subject_words:
-                    if word.lower() not in skip_words and len(word) > 3:
-                        search_keyword = word
-                        break
-                
-                # Fallback to first word if all are skipped
-                if not search_keyword and subject_words:
-                    search_keyword = subject_words[0]
-                elif not search_keyword:
-                    search_keyword = subject[:30]
-                
-                print(f"Searching with keyword: '{search_keyword}'", file=sys.stderr)
-                
-                messages = get_email_content(
+                content = get_email_content_by_details(
                     account=account,
-                    subject_keyword=search_keyword,
+                    subject=subject,
+                    sender=sender,
                     mailbox=mailbox_name,
-                    max_results=20  # Get more to find exact match
+                    timeout=30  # Shorter timeout for targeted search
                 )
                 
-                # Find the exact matching email by comparing full subject
-                matching_email = None
-                if messages:
-                    print(f"Found {len(messages)} matching emails, searching for exact subject match...", file=sys.stderr)
-                    for msg in messages:
-                        msg_subject = msg.get('subject', '').strip()
-                        if msg_subject == subject.strip():
-                            matching_email = msg
-                            print(f"Found exact match: {msg_subject[:50]}...", file=sys.stderr)
+                if not content:
+                    print("Targeted search failed. Trying fallback method...", file=sys.stderr)
+                    
+                    # Fallback to keyword search
+                    from applescript_search import get_email_content
+                    
+                    # Use first significant word from subject
+                    clean_subject = subject.replace('[External]', '').replace('[', '').replace(']', '').strip()
+                    subject_words = clean_subject.split()
+                    skip_words = {'for', 'a', 'an', 'the', 'of', 'in', 'on', 'at', 'to', 'with'}
+                    search_keyword = None
+                    for word in subject_words:
+                        if word.lower() not in skip_words and len(word) > 3:
+                            search_keyword = word
                             break
                     
-                    # If no exact match, try first result
-                    if not matching_email:
-                        matching_email = messages[0]
-                        print(f"Warning: Using first matching email (subject may differ)", file=sys.stderr)
-                        print(f"  Expected: {subject[:50]}...", file=sys.stderr)
-                        print(f"  Found: {matching_email.get('subject', '')[:50]}...", file=sys.stderr)
+                    if not search_keyword and subject_words:
+                        search_keyword = subject_words[0]
+                    elif not search_keyword:
+                        search_keyword = subject[:30]
+                    
+                    print(f"Fallback search with keyword: '{search_keyword}'", file=sys.stderr)
+                    
+                    messages = get_email_content(
+                        account=account,
+                        subject_keyword=search_keyword,
+                        mailbox=mailbox_name,
+                        max_results=5  # Limit to reduce timeout risk
+                    )
+                
+                    # Find exact match from fallback results
+                    matching_email = None
+                    if messages:
+                        for msg in messages:
+                            if msg.get('subject', '').strip() == subject.strip():
+                                matching_email = msg
+                                break
+                        if not matching_email:
+                            matching_email = messages[0]
+                    
+                    if matching_email:
+                        content = matching_email.get('content', matching_email.get('preview', ''))
+                    else:
+                        content = None
                 else:
-                    print(f"Warning: No emails found with keyword '{search_keyword}'. Trying broader search...", file=sys.stderr)
-                    # Try searching without account filter
-                    try:
-                        messages = get_email_content(
-                            account=None,  # Search all accounts
-                            subject_keyword=search_keyword,
-                            mailbox=mailbox_name,
-                            max_results=20
-                        )
-                        if messages:
-                            for msg in messages:
-                                if msg.get('subject', '').strip() == subject.strip():
-                                    matching_email = msg
-                                    break
-                            if not matching_email and messages:
-                                matching_email = messages[0]
-                    except Exception as e:
-                        print(f"Broader search also failed: {e}", file=sys.stderr)
-                
-                if not matching_email:
-                    print("Error: Could not retrieve email content", file=sys.stderr)
-                    print(f"  Account used: {account}", file=sys.stderr)
-                    print(f"  Search keyword: {search_keyword}", file=sys.stderr)
-                    print(f"  Subject: {subject}", file=sys.stderr)
-                    return 1
-                
-                content = matching_email.get('content', matching_email.get('preview', ''))
+                    # Success with targeted search!
+                    pass  # content already set
                 
                 if not content:
-                    print("Error: Email content is empty", file=sys.stderr)
+                    print("Error: Could not retrieve email content", file=sys.stderr)
+                    print(f"  Account: {account}", file=sys.stderr)
+                    print(f"  Subject: {subject[:60]}", file=sys.stderr)
+                    print(f"  Sender: {sender[:40]}", file=sys.stderr)
                     return 1
                 
                 # Copy to clipboard

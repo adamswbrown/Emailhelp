@@ -198,36 +198,43 @@ class EmailScorer:
         
         # Check subject for informational patterns (license expiration, etc.)
         # These often have "ACTION REQUIRED" but are actually FYI (not ACTION, not IGNORE)
+        # FIXED 2025-12-30: Only apply reduction once, not twice
         subject_lower = subject.lower()
         informational_in_subject = False
+        informational_reduction_applied = False
+        
+        # Check INFORMATIONAL_PATTERNS first
         for pattern in self.INFORMATIONAL_PATTERNS:
             if pattern in subject_lower:
                 informational_in_subject = True
                 # Reduce "ACTION REQUIRED" score if it's informational
-                # Reduce enough to move from ACTION (65) to FYI range (30-59)
-                if 'action_required' in signals:
+                # Only apply once to avoid double-reduction
+                if 'action_required' in signals and not informational_reduction_applied:
                     # This is likely a license expiration notice, not truly requiring action
-                    # Reduce by 15 to get score ~50 (FYI range)
+                    # Reduce by 15 to get score ~50 (was 65, now 50 with threshold=30 = ACTION)
                     signals['informational_action_required'] = -15
                     subject_score -= 15
+                    informational_reduction_applied = True
                 break
         
         # Also check for common license expiration phrases in subject
-        license_expiration_keywords = [
-            'purchase a license',
-            'purchase a licence',
-            'before your access',
-            'before your data',
-            'expires soon',
-            'will expire',
-        ]
-        for keyword in license_expiration_keywords:
-            if keyword in subject_lower:
-                informational_in_subject = True
-                if 'action_required' in signals:
-                    signals['informational_action_required'] = -15
-                    subject_score -= 15
-                break
+        # Only apply if we haven't already reduced the score
+        if not informational_reduction_applied:
+            license_expiration_keywords = [
+                'purchase a license',
+                'purchase a licence',
+                'before your access',
+                'before your data',
+                'expires soon',
+                'will expire',
+            ]
+            for keyword in license_expiration_keywords:
+                if keyword in subject_lower:
+                    informational_in_subject = True
+                    if 'action_required' in signals:
+                        signals['informational_action_required'] = -15
+                        subject_score -= 15
+                    break
         
         # Content signals
         content_score = 0
