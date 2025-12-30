@@ -29,7 +29,7 @@ class EmailClassifier:
     """Classify emails based on weighted signal scores."""
     
     # Classification thresholds
-    ACTION_THRESHOLD = 60
+    ACTION_THRESHOLD = 40
     FYI_THRESHOLD = 30
     
     @staticmethod

@@ -22,6 +22,7 @@ COMPATIBILITY RISKS:
 import sqlite3
 import os
 import glob
+import re
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 
@@ -57,8 +58,30 @@ class MailIndexReader:
         if not mail_dir.exists():
             return None
         
+        # Check if we have read permissions
+        if not os.access(mail_dir, os.R_OK):
+            raise PermissionError(
+                f"Cannot access {mail_dir}. "
+                "macOS requires Full Disk Access permission.\n"
+                "To fix: System Settings > Privacy & Security > Full Disk Access\n"
+                "Add Terminal (or your Python interpreter) to the list."
+            )
+        
         # Find all V* directories (e.g., V10, V11)
-        version_dirs = sorted(mail_dir.glob("V*"), reverse=True)
+        try:
+            version_dirs = sorted(mail_dir.glob("V*"), reverse=True)
+        except PermissionError:
+            raise PermissionError(
+                f"Cannot read {mail_dir}. "
+                "macOS requires Full Disk Access permission.\n"
+                "To fix: System Settings > Privacy & Security > Full Disk Access\n"
+                "Add Terminal (or your Python interpreter) to the list."
+            )
+        
+        if not version_dirs:
+            # Directory exists but no V* folders found
+            # This might mean Mail hasn't been run, or it's a different structure
+            return None
         
         for version_dir in version_dirs:
             envelope_path = version_dir / "MailData" / "Envelope Index"
@@ -161,15 +184,43 @@ class MailIndexReader:
         if table_name is None:
             raise RuntimeError("Could not find messages table in Envelope Index")
         
-        # Build SELECT clause with common columns
-        # We'll handle missing columns gracefully
+        # Check which tables exist for joins
+        # According to Apple Mail schema: sender and subject are foreign keys
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        all_tables = {row[0] for row in cursor.fetchall()}
+        
+        has_addresses_table = 'addresses' in all_tables
+        has_subjects_table = 'subjects' in all_tables
+        has_mailboxes_table = 'mailboxes' in all_tables
+        
+        # Build SELECT clause with proper joins
+        # sender and subject are foreign keys, so we need to join to get actual values
+        if has_addresses_table:
+            sender_col = "addr.address as sender"
+        else:
+            # Fallback: use sender column directly (might be integer ID)
+            sender_col = f"{table_name}.sender as sender"
+        
+        if has_subjects_table:
+            subject_col = "subj.subject as subject"
+        else:
+            # Fallback: use subject column directly (might be integer ID)
+            subject_col = f"{table_name}.subject as subject"
+        
+        # Determine mailbox column - use URL from mailboxes table if available
+        # We'll always try to join with mailboxes to get the URL, not just for filtering
+        if has_mailboxes_table:
+            mailbox_col = "mb.url as mailbox"
+        else:
+            mailbox_col = f"{table_name}.mailbox as mailbox"
+        
         select_columns = [
-            "ROWID as message_id",
-            "subject",
-            "sender",
-            "date_received",
-            "mailbox",
-            "read"
+            f"{table_name}.ROWID as message_id",
+            subject_col,
+            sender_col,
+            f"{table_name}.date_received as date_received",
+            mailbox_col,
+            f"{table_name}.read as read"
         ]
         
         # Try to add optional columns if they exist
@@ -184,7 +235,7 @@ class MailIndexReader:
         
         for col, alias in optional_columns.items():
             if col in available_cols:
-                select_columns.append(f"{col} as {alias}")
+                select_columns.append(f"{table_name}.{col} as {alias}")
         
         # Build WHERE clause
         where_clauses = []
@@ -200,27 +251,66 @@ class MailIndexReader:
         if unread_only:
             where_clauses.append("read = 0")
         
-        if mailbox:
+        # Check if we need to join with mailboxes table for account filtering
+        # Account filtering requires joining with mailboxes table to check url column
+        needs_mailbox_join = account is not None
+        
+        if mailbox and not needs_mailbox_join:
+            # Only add mailbox filter here if we're not doing a join
             where_clauses.append("mailbox LIKE ?")
             params.append(f"%{mailbox}%")
         
-        if account:
-            # Filter by account name (Exchange, iCloud, Gmail, etc.)
-            # Account filtering works by checking the mailbox path
-            # Exchange mailboxes typically contain the account name in their path
-            where_clauses.append("mailbox LIKE ?")
-            params.append(f"%{account}%")
+        # Build joins for addresses, subjects, and mailboxes tables
+        joins = []
         
-        where_clause = " AND ".join(where_clauses) if where_clauses else "1=1"
+        # Join with addresses table to get sender email address
+        if has_addresses_table:
+            joins.append(f"LEFT JOIN addresses addr ON {table_name}.sender = addr.rowid")
+        
+        # Join with subjects table to get subject text
+        if has_subjects_table:
+            joins.append(f"LEFT JOIN subjects subj ON {table_name}.subject = subj.rowid")
+        
+        # Always join with mailboxes table to get mailbox URL (needed for display and filtering)
+        if has_mailboxes_table:
+            joins.append(f"LEFT JOIN mailboxes mb ON {table_name}.mailbox = mb.ROWID")
+            
+            # Add account/mailbox filtering if needed
+            if account:
+                where_clauses.append("mb.url LIKE ?")
+                params.append(f"%{account}%")
+            
+            if mailbox:
+                where_clauses.append("mb.url LIKE ?")
+                params.append(f"%{mailbox}%")
+        else:
+            # Fallback: try filtering on mailbox column directly (may not work if it's integer)
+            if account:
+                where_clauses.append(f"{table_name}.mailbox LIKE ?")
+                params.append(f"%{account}%")
+        
+        # Qualify WHERE clause columns to avoid ambiguity
+        qualified_where_clauses = []
+        for clause in where_clauses:
+            # Qualify column names that might be ambiguous
+            clause = re.sub(r'\bdate_received\b', f'{table_name}.date_received', clause)
+            clause = re.sub(r'\bread\b', f'{table_name}.read', clause)
+            clause = re.sub(r'\bmailbox\b(?!\.)', f'{table_name}.mailbox', clause)
+            qualified_where_clauses.append(clause)
+        
+        where_clause = " AND ".join(qualified_where_clauses) if qualified_where_clauses else "1=1"
+        join_clause = " ".join(joins) if joins else ""
         
         # Build final query
         query = f"""
             SELECT {', '.join(select_columns)}
             FROM {table_name}
+            {join_clause}
             WHERE {where_clause}
-            ORDER BY date_received DESC
+            ORDER BY {table_name}.date_received DESC
             LIMIT ?
         """
+        
         params.append(limit)
         
         try:
@@ -277,14 +367,28 @@ class MailIndexReader:
         cursor = self.connection.cursor()
         
         try:
+            # First check available columns for debugging
+            available_cols = self._get_available_columns()
+            
             # Get all distinct mailbox paths
-            cursor.execute("SELECT DISTINCT mailbox FROM messages WHERE mailbox IS NOT NULL")
+            cursor.execute("SELECT DISTINCT mailbox FROM messages WHERE mailbox IS NOT NULL LIMIT 100")
             mailboxes = [row[0] for row in cursor.fetchall()]
             
             # Extract account names (typically the first part of the path)
             accounts = set()
+            has_int_mailboxes = False
             for mailbox in mailboxes:
+                # Skip if mailbox is None, empty
                 if not mailbox:
+                    continue
+                
+                # Track if we have integer mailbox IDs (need to join with mailboxes table)
+                if isinstance(mailbox, int):
+                    has_int_mailboxes = True
+                    continue
+                
+                # Convert to string if it's not already (handles integer mailbox IDs)
+                if not isinstance(mailbox, str):
                     continue
                 
                 # Split by common path separators
@@ -296,6 +400,89 @@ class MailIndexReader:
                         accounts.add(part)
                         break
             
-            return sorted(list(accounts))
+            # If no accounts found from mailbox paths, try account column directly
+            if not accounts:
+                if 'account' in available_cols:
+                    cursor.execute("SELECT DISTINCT account FROM messages WHERE account IS NOT NULL AND account != ''")
+                    account_rows = cursor.fetchall()
+                    accounts = {str(row[0]).strip() for row in account_rows if row[0]}
+            
+            # If still no accounts, try mailbox_path column (some versions use this)
+            if not accounts:
+                if 'mailbox_path' in available_cols:
+                    cursor.execute("SELECT DISTINCT mailbox_path FROM messages WHERE mailbox_path IS NOT NULL LIMIT 100")
+                    paths = cursor.fetchall()
+                    for row in paths:
+                        path = row[0]
+                        if isinstance(path, str) and path:
+                            parts = path.replace('\\', '/').split('/')
+                            for part in parts:
+                                if part and not part.startswith('.'):
+                                    accounts.add(part.strip())
+                                    break
+            
+            # If mailbox column contains integers, join with mailboxes table to get paths
+            # Based on Apple Mail schema: mailbox column is ROWID referencing mailboxes table
+            if not accounts and has_int_mailboxes:
+                try:
+                    # Check if mailboxes table exists
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='mailboxes'")
+                    if cursor.fetchone():
+                        # Get mailbox URLs/paths from mailboxes table
+                        # The url column contains paths like "Exchange/INBOX" or "iCloud/Sent"
+                        cursor.execute("""
+                            SELECT DISTINCT mail.url
+                            FROM messages m
+                            JOIN mailboxes mail ON m.mailbox = mail.ROWID
+                            WHERE mail.url IS NOT NULL AND mail.url != ''
+                            LIMIT 100
+                        """)
+                        for url_row in cursor.fetchall():
+                            url = url_row[0]
+                            if isinstance(url, str) and url:
+                                # URL format is typically like "Exchange/INBOX" or "iCloud/Sent"
+                                parts = url.replace('\\', '/').split('/')
+                                for part in parts:
+                                    if part and not part.startswith('.'):
+                                        accounts.add(part.strip())
+                                        break
+                except sqlite3.Error:
+                    # If join fails, try checking mailboxes table directly
+                    try:
+                        cursor.execute("PRAGMA table_info(mailboxes)")
+                        table_cols = [col[1] for col in cursor.fetchall()]
+                        if 'url' in table_cols:
+                            cursor.execute("SELECT DISTINCT url FROM mailboxes WHERE url IS NOT NULL AND url != '' LIMIT 100")
+                            for url_row in cursor.fetchall():
+                                url = url_row[0]
+                                if isinstance(url, str) and url:
+                                    parts = url.replace('\\', '/').split('/')
+                                    for part in parts:
+                                        if part and not part.startswith('.'):
+                                            accounts.add(part.strip())
+                                            break
+                    except sqlite3.Error:
+                        pass
+            
+            # If still no accounts, check other tables for account column
+            if not accounts:
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                all_tables = cursor.fetchall()
+                for table_row in all_tables:
+                    table_name = table_row[0]
+                    if table_name == 'messages':
+                        continue  # Already checked
+                    try:
+                        cursor.execute(f"PRAGMA table_info({table_name})")
+                        table_cols = [col[1] for col in cursor.fetchall()]
+                        if 'account' in table_cols:
+                            cursor.execute(f"SELECT DISTINCT account FROM {table_name} WHERE account IS NOT NULL AND account != ''")
+                            for acc_row in cursor.fetchall():
+                                if acc_row[0]:
+                                    accounts.add(str(acc_row[0]).strip())
+                    except sqlite3.Error:
+                        continue
+            
+            return sorted(list(accounts)) if accounts else []
         except sqlite3.Error:
             return []

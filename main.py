@@ -157,6 +157,10 @@ def main():
         
         return 0
         
+    except PermissionError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+        
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         print("\nMake sure Apple Mail is installed and has been run at least once.", file=sys.stderr)

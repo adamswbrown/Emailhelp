@@ -34,7 +34,10 @@ class EmailScorer:
         'icloud.com',
         'me.com',
         'mac.com',
-        # Add more trusted domains as needed
+        'altra.cloud',
+        'microsoft.com',
+        '2bcloud.io',
+    
     ]
     
     # Bulk/automated sender patterns
@@ -65,6 +68,15 @@ class EmailScorer:
         'action required',
         'please respond',
         'feedback needed',
+        'please let me know',
+        'when can you',
+        'do you have',
+        'can we',
+        'meeting request',
+        'schedule',
+        'deadline',
+        'follow up',
+        'follow-up',
     ]
     
     # Newsletter/digest indicators in subject
@@ -76,6 +88,11 @@ class EmailScorer:
         'monthly update',
         'roundup',
         'recap',
+        'your daily',
+        'your weekly',
+        'summary',
+        'automated',
+        'system notification',
     ]
     
     # Unsubscribe indicators (strong signal of bulk email)
