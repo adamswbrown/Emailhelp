@@ -18,6 +18,12 @@ python3 main.py --account Exchange --category ACTION
 
 # Show scoring breakdown
 python3 main.py --limit 10 --why
+
+# Analyze your email patterns
+python3 analyze_emails.py --since 30
+
+# Automatically update rules based on your emails
+python3 analyze_and_update.py --since 30
 ```
 
 ## Table of Contents
@@ -288,16 +294,21 @@ Emails are scored 0-100 using explicit, deterministic signals. All scoring is tr
 
 | Signal | Points | Description |
 |--------|--------|-------------|
+| Action required | +35 | Subject contains "ACTION REQUIRED", "action needed", etc. |
+| Meeting/call request | +30 | Subject contains "availability", "schedule a call", "meeting request", etc. |
 | Contains `?` | +15 | Subject contains a question (likely needs response) |
 | Starts with `RE:` | +10 | Reply to existing conversation |
+| General meeting mention | +15 | Subject mentions "meeting" or "call" (less specific) |
+| Informational action required | -15 | "ACTION REQUIRED" but content indicates informational/license expiration |
 | Newsletter/digest | -20 | Subject contains newsletter, digest, weekly update, etc. |
 
 ### Content Signals (from preview text)
 
 | Signal | Points | Description |
 |--------|--------|-------------|
-| Action phrases | +20 | Contains "can you", "could you", "please advise", "urgent", etc. |
+| Action phrases | +20 | Contains "can you", "could you", "please advise", "urgent", "deadline", etc. |
 | Mentions your name | +15 | Body preview mentions your name (use `--user-name` flag) |
+| Informational notice | -15 | Contains license expiration, renewal notices, "will expire soon", etc. |
 | Has unsubscribe | -40 | Contains unsubscribe link (strong bulk indicator) |
 
 ### Score Examples
@@ -307,8 +318,18 @@ Score 85 = Direct sender (+20) + Trusted domain (+10) + Question (+15) +
            Action phrase (+20) + Mentions name (+15) + Reply (+10)
            → ACTION
 
-Score 50 = Direct sender (+20) + Trusted domain (+10) + Reply (+10)
+Score 65 = Action required (+35) + Direct sender (+20) + Trusted domain (+10)
+           → ACTION
+
+Score 60 = Meeting request (+30) + Direct sender (+20) + Trusted domain (+10)
+           → ACTION
+
+Score 50 = Direct sender (+20) + Trusted domain (+10) + Reply (+10) + Meeting mention (+15)
            → FYI
+
+Score 35 = Action required (+35) + Direct sender (+20) + Trusted domain (+10) + 
+           Informational action required (-15) + Informational notice (-15)
+           → FYI (license expiration notice, informational)
 
 Score 10 = Bulk sender (-30) + Newsletter (-20) + Has unsubscribe (-40)
            → IGNORE
@@ -564,6 +585,27 @@ This tool applies accounting principles to email management:
 
 ## Customization
 
+### Analyzing Your Emails
+
+Use the analysis script to understand your email patterns and get recommendations:
+
+```bash
+# Analyze last 30 days of emails
+python3 analyze_emails.py --since 30
+
+# Analyze all emails
+python3 analyze_emails.py --all
+
+# Automatically update rules based on analysis
+python3 analyze_and_update.py --since 30
+```
+
+The analysis will:
+- Identify common sender domains to add as trusted
+- Suggest threshold adjustments if classification is unbalanced
+- Show score distributions and patterns
+- Provide recommendations for improvement
+
 ### Adding Trusted Domains
 
 Edit `scoring.py` and add to `TRUSTED_DOMAINS`:
@@ -572,10 +614,15 @@ Edit `scoring.py` and add to `TRUSTED_DOMAINS`:
 TRUSTED_DOMAINS = [
     'gmail.com',
     'outlook.com',
+    'altra.cloud',      # Work domain
+    'microsoft.com',
+    '2bcloud.io',
     'yourcompany.com',  # Add your company domain
     # ... more domains
 ]
 ```
+
+Or use the analysis script to automatically identify and add common domains.
 
 ### Adjusting Classification Thresholds
 
@@ -596,6 +643,16 @@ if 'vip@company.com' in sender_lower:
     signals['vip_sender'] = 30
     score += 30
 ```
+
+### Understanding Informational Emails
+
+The tool automatically detects informational emails (license expiration notices, renewal reminders, etc.) that have "ACTION REQUIRED" in the subject but are actually FYI. These are scored lower to classify them correctly:
+
+- **Subject patterns**: "before your access", "will expire", "purchase a license"
+- **Content patterns**: "license will expire", "complimentary access", "renewal plan"
+- **Result**: Score reduced by -15 to -25 points, moving from ACTION to FYI range
+
+This ensures that emails where you're CC'd or that are informational don't incorrectly trigger ACTION classification.
 
 ---
 
