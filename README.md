@@ -1,8 +1,8 @@
-# macOS Apple Mail Accounting & Categorization CLI
+# Email Accounting & Categorization CLI
 
 > **Treat email as records to be accounted for, not messages to be read.**
 
-A local, deterministic command-line tool for email accounting and triage on macOS. Built specifically for users with multiple email accounts (personal + work) who need fast, explainable email classification without AI or external services.
+A local, deterministic command-line tool for email accounting and triage on macOS. Supports both **Apple Mail** and **Outlook for Mac**. Built specifically for users with multiple email accounts (personal + work) who need fast, explainable email classification without AI or external services.
 
 ## Quick Start
 
@@ -15,6 +15,12 @@ python3 main.py --list-accounts
 
 # Show ACTION items from Exchange account only
 python3 main.py --account Exchange --category ACTION
+
+# Use Outlook instead of Apple Mail
+python3 main.py --client outlook --limit 20
+
+# Auto-detect email client (default)
+python3 main.py --client auto
 
 # Show scoring breakdown
 python3 main.py --limit 10 --why
@@ -81,7 +87,7 @@ This CLI application reads Apple Mail's internal SQLite database (Envelope Index
 ## Requirements
 
 - **macOS** (latest versions)
-- **Apple Mail.app** installed and configured
+- **Apple Mail.app** OR **Outlook for Mac** installed and configured
 - **Python 3.7+**
 - No external dependencies (uses Python standard library only)
 
@@ -126,9 +132,10 @@ python3 main.py
 --account NAME        Filter by account name (e.g., "Exchange", "iCloud")
 --list-accounts       List all available accounts and exit
 --category CATEGORY   Filter by classification (ACTION, FYI, or IGNORE)
+--client CLIENT       Email client: apple-mail, outlook, or auto (default: auto)
 --why                 Show signal breakdown and score explanation
 --user-name NAME      Your name (to detect personal mentions in scoring)
---db-path PATH        Explicit path to Envelope Index database
+--db-path PATH        Explicit path to email database (auto-detects if not provided)
 ```
 
 ### Example Commands
@@ -470,13 +477,17 @@ Emails are classified into three deterministic categories:
 
 ---
 
-## How It Works: Apple Mail Envelope Index
+## How It Works: Email Database Access
 
-### Data Source
+### Supported Email Clients
+
+The tool supports two email clients on macOS:
+
+#### Apple Mail
 
 Apple Mail maintains an internal SQLite database called **Envelope Index** that stores metadata for all messages:
 
-**Typical location:**
+**Location:**
 ```
 ~/Library/Mail/V10/MailData/Envelope Index
 ~/Library/Mail/V11/MailData/Envelope Index
@@ -484,16 +495,32 @@ Apple Mail maintains an internal SQLite database called **Envelope Index** that 
 
 The tool automatically discovers the most recent version.
 
+#### Outlook for Mac
+
+Outlook for Mac uses SQLite database format:
+
+**Location:**
+```
+~/Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Profile/Data/Outlook.sqlite
+```
+
+### Auto-Detection
+
+By default, the tool auto-detects which email client is available:
+1. Tries Apple Mail first
+2. Falls back to Outlook if Apple Mail is not found
+3. Use `--client apple-mail` or `--client outlook` to force a specific client
+
 ### What Data Is Accessed
 
-The Envelope Index contains:
-- Message ID (ROWID)
+Both databases provide:
+- Message ID
 - Subject line
 - Sender address
 - Date received
-- Mailbox name
+- Mailbox/folder name
 - Read/unread flag
-- Path to .emlx file (for preview extraction)
+- Preview text (Outlook) or path to .emlx file (Apple Mail)
 
 ### Read-Only Access
 
@@ -517,12 +544,17 @@ For the `--why` flag, the tool may read `.emlx` files to extract body previews:
 The tool is organized into simple, focused modules:
 
 ```
-mail_index.py    - SQLite access and queries
-preview.py       - .emlx body preview extraction
-scoring.py       - Weighted signal scoring (WSS)
-classifier.py    - Score-to-category mapping
-cli.py           - Argparse and output formatting
-main.py          - Application entry point
+email_reader.py       - Unified interface for Apple Mail and Outlook
+mail_index.py         - Apple Mail SQLite access and queries
+outlook_index.py      - Outlook SQLite access and queries
+preview.py            - .emlx body preview extraction
+scoring.py            - Weighted signal scoring (WSS)
+classifier.py         - Score-to-category mapping
+cli.py                - Argparse and output formatting
+main.py               - Application entry point
+analyze_emails.py     - Email pattern analysis tool
+analyze_and_update.py - Automated rule updates based on analysis
+read_email.py         - Read full email content for debugging
 ```
 
 No frameworks, no external dependencies—just clear, deterministic Python code.

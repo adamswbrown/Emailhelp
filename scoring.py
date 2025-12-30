@@ -60,6 +60,7 @@ class EmailScorer:
         'could you',
         'please advise',
         'please review',
+        'review',
         'please confirm',
         'need your',
         'waiting for',
@@ -73,10 +74,14 @@ class EmailScorer:
         'do you have',
         'can we',
         'meeting request',
+        'meeting',
         'schedule',
+        'schedule a call',
+        'call',
         'deadline',
         'follow up',
         'follow-up',
+        'approve',
     ]
     
     # Newsletter/digest indicators in subject
@@ -93,6 +98,20 @@ class EmailScorer:
         'summary',
         'automated',
         'system notification',
+    ]
+    
+    # Automated Jira follow-up patterns (reduce score - these are informational, not action)
+    # These are automated notifications that don't require action
+    JIRA_AUTOMATED_PATTERNS = [
+        'automation for jira commented',
+        'following up on your recent support request',
+        'haven\'t heard back from you',
+        'will be closed automatically',
+        'no further response is received',
+        'check in and see if you still need assistance',
+        'we\'re just following up',
+        'wanted to check in',
+        'if you\'ve already found a solution',
     ]
     
     # Informational/license expiration patterns (reduce score - these are FYI, not action)
@@ -115,9 +134,15 @@ class EmailScorer:
         'before your access',
         'before your data is removed',
         'your data will be removed',
+        'notification',
+        'system notification',
+        'automated notification',
         'your instance will be deleted',
         'complimentary access',
         'free access',
+        'notification',
+        'system notification',
+        'automated notification',
     ]
     
     # Unsubscribe indicators (strong signal of bulk email)
@@ -360,6 +385,14 @@ class EmailScorer:
         """
         score = 0
         preview_lower = preview.lower()
+        
+        # Check for automated Jira follow-up patterns (strong negative signal)
+        # These are automated notifications that appear urgent but don't require action
+        for pattern in self.JIRA_AUTOMATED_PATTERNS:
+            if pattern in preview_lower:
+                signals['jira_automated'] = -30
+                score -= 30
+                break  # Only count once
         
         # Check for informational/license expiration patterns (reduce score)
         # These are typically FYI messages, not requiring action from recipient

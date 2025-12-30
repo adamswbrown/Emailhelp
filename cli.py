@@ -22,7 +22,7 @@ class CLI:
         """
         parser = argparse.ArgumentParser(
             prog='mail-accounting',
-            description='Apple Mail Accounting & Categorization CLI - Deterministic email triage',
+            description='Email Accounting & Categorization CLI - Deterministic email triage (supports Apple Mail and Outlook)',
             formatter_class=argparse.RawDescriptionHelpFormatter,
             epilog="""
 Examples:
@@ -61,7 +61,14 @@ Examples:
             '--since',
             type=int,
             metavar='DAYS',
-            help='Only show emails from the last N days'
+            default=365,
+            help='Only show emails from the last N days (default: 365, use --all to show all emails)'
+        )
+        
+        parser.add_argument(
+            '--all',
+            action='store_true',
+            help='Show all emails regardless of date (ignores --since)'
         )
         
         parser.add_argument(
@@ -73,7 +80,8 @@ Examples:
         parser.add_argument(
             '--mailbox',
             type=str,
-            help='Filter by mailbox name (e.g., "Inbox")'
+            default='Inbox',
+            help='Filter by mailbox name (default: Inbox, use --mailbox "" to include all mailboxes)'
         )
         
         parser.add_argument(
@@ -111,7 +119,15 @@ Examples:
         parser.add_argument(
             '--db-path',
             type=str,
-            help='Explicit path to Envelope Index database (auto-detects if not provided)'
+            help='Explicit path to email database (auto-detects if not provided)'
+        )
+        
+        parser.add_argument(
+            '--client',
+            type=str,
+            choices=['apple-mail', 'outlook', 'auto'],
+            default='auto',
+            help='Email client to use: apple-mail, outlook, or auto (default: auto-detect)'
         )
         
         return parser
@@ -166,7 +182,7 @@ class TableFormatter:
     @staticmethod
     def _format_date(timestamp: Any) -> str:
         """
-        Format Unix timestamp as YYYY-MM-DD.
+        Format Unix timestamp as dd/mm/yyyy (UK format).
         
         Args:
             timestamp: Unix timestamp (int/float) or None
@@ -179,7 +195,7 @@ class TableFormatter:
         
         try:
             dt = datetime.fromtimestamp(int(timestamp))
-            return dt.strftime('%Y-%m-%d')
+            return dt.strftime('%d/%m/%Y')
         except (ValueError, TypeError, OSError):
             return 'Invalid'
     

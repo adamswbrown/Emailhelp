@@ -23,7 +23,7 @@ This is a read-only, deterministic email accounting tool.
 import sys
 from typing import List, Dict, Any
 
-from mail_index import MailIndexReader
+from email_reader import create_reader
 from preview import EmailPreview
 from scoring import EmailScorer
 from classifier import EmailClassifier, EmailCategory
@@ -55,8 +55,14 @@ def process_emails(
         preview_text = None
         
         # Extract preview if requested and path available
-        if show_preview and msg.get('emlx_path'):
-            preview_text = EmailPreview.extract_from_emlx(msg['emlx_path'])
+        # Note: Outlook uses different message file format, preview extraction may not work
+        if show_preview:
+            emlx_path = msg.get('emlx_path') or msg.get('message_path')
+            if emlx_path:
+                preview_text = EmailPreview.extract_from_emlx(emlx_path)
+            # For Outlook, preview might already be in the message dict
+            elif msg.get('preview'):
+                preview_text = msg.get('preview')
         
         # Score email
         score, signals = scorer.score_email(sender, subject, preview_text)
@@ -82,13 +88,23 @@ def main():
     args = parser.parse_args()
     
     try:
-        # Initialize mail index reader
-        print("Locating Apple Mail Envelope Index...", file=sys.stderr)
-        reader = MailIndexReader(db_path=args.db_path)
+        # Initialize email reader (supports both Apple Mail and Outlook)
+        client_name = args.client if args.client != 'auto' else None
+        
+        if client_name:
+            print(f"Using {client_name} database...", file=sys.stderr)
+        else:
+            print("Auto-detecting email client...", file=sys.stderr)
+        
+        reader = create_reader(client=client_name, db_path=args.db_path)
+        
+        # Detect which client we're using for display
+        client_display = "Apple Mail" if isinstance(reader, __import__('email_reader').AppleMailReader) else "Outlook"
+        print(f"✓ Connected to {client_display} database", file=sys.stderr)
         
         # Handle --list-accounts flag
         if args.list_accounts:
-            print("\nDiscovering accounts from mailbox paths...", file=sys.stderr)
+            print("\nDiscovering accounts...", file=sys.stderr)
             with reader:
                 accounts = reader.get_accounts()
             
@@ -111,8 +127,11 @@ def main():
             filter_desc.append(f"mailbox={args.mailbox}")
         if args.unread_only:
             filter_desc.append("unread only")
-        if args.since:
-            filter_desc.append(f"last {args.since} days")
+        
+        # Apply date filter unless --all is specified
+        since_days = None if args.all else args.since
+        if since_days:
+            filter_desc.append(f"last {since_days} days")
         
         filter_str = f" ({', '.join(filter_desc)})" if filter_desc else ""
         print(f"Querying messages (limit={args.limit}{filter_str})...", file=sys.stderr)
@@ -120,7 +139,7 @@ def main():
         with reader:
             messages = reader.query_messages(
                 limit=args.limit,
-                since_days=args.since,
+                since_days=since_days,
                 unread_only=args.unread_only,
                 mailbox=args.mailbox,
                 account=args.account
