@@ -531,31 +531,40 @@ class EmailAccountingApp(App):
                             
                             if result.returncode == 0 and result.stdout.strip():
                                 preview_text = result.stdout.strip()
-                                # Clean up - remove HTML if present
+                                
+                                # Clean up text (based on apple-mail-mcp patterns)
+                                # Remove HTML if present
                                 if '<' in preview_text:
                                     preview_text = re.sub(r'<[^>]+>', '', preview_text)
                                     preview_text = re.sub(r'\s+', ' ', preview_text).strip()
-                                # Remove signatures and quoted replies
+                                
+                                # Remove signatures and quoted replies (keep more content than preview extraction)
                                 if preview_text:
                                     lines = preview_text.split('\n')
                                     cleaned_lines = []
                                     for line in lines:
                                         line = line.strip()
+                                        
                                         # Check for signature markers
                                         if any(marker in line for marker in EmailPreview.SIGNATURE_MARKERS):
                                             break
+                                        
                                         # Check for quote markers
                                         is_quote = False
                                         for pattern in EmailPreview.QUOTE_MARKERS:
                                             if re.search(pattern, line, re.IGNORECASE):
                                                 is_quote = True
                                                 break
+                                        
                                         if is_quote:
                                             break
+                                        
                                         if line:
                                             cleaned_lines.append(line)
+                                    
                                     preview_text = '\n'.join(cleaned_lines)
-                                # Limit length
+                                
+                                # Limit length for UI display (2000 chars)
                                 if preview_text and len(preview_text) > 2000:
                                     preview_text = preview_text[:2000] + '...'
                     except subprocess.TimeoutExpired:

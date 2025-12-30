@@ -14,7 +14,8 @@ python3 main.py
 python3 main.py --list-accounts
 
 # Show ACTION items from Exchange account only
-python3 main.py --account Exchange --category ACTION
+# Note: Use "ews" if "Exchange" doesn't work (account filtering matches mailbox URLs)
+python3 main.py --account ews --category ACTION
 
 # Use Outlook instead of Apple Mail
 python3 main.py --client outlook --limit 20
@@ -33,6 +34,13 @@ python3 main.py --limit 10 --open 3
 
 # Open email in Outlook instead
 python3 main.py --limit 10 --open 3 --open-client outlook
+
+# Extract email content and copy to clipboard
+# Note: Use "ews" if "Exchange" doesn't work
+python3 main.py --search "meeting" --account ews --extract-content --copy-content
+
+# Copy content of first email from displayed results
+python3 main.py --account ews --category ACTION --copy-index 1
 
 # Analyze your email patterns (supports both Apple Mail and Outlook)
 python3 analyze_emails.py --client apple-mail --since 30
@@ -152,6 +160,11 @@ python3 main.py
 --client CLIENT       Email client: apple-mail, outlook, or auto (default: auto)
 --open [INDEX]        Interactive email selection (--open) or open email at INDEX (--open INDEX)
 --open-client CLIENT   Email client for --open: apple-mail or outlook (default: apple-mail)
+--extract-content     Extract full email content (requires --search and --account)
+--copy-content        Copy email content to clipboard (use with --extract-content)
+--copy-index INDEX    Copy content of email at INDEX to clipboard (works with displayed results)
+--output-raw          Output raw email content only (for piping to other apps)
+--output-file PATH    Save email content to file (use with --extract-content)
 --why                 Show signal breakdown and score explanation
 --user-name NAME      Your name (to detect personal mentions in scoring)
 --db-path PATH        Explicit path to email database (auto-detects if not provided)
@@ -166,12 +179,14 @@ python3 main.py --list-accounts
 
 **Filter by Exchange account only:**
 ```bash
-python3 main.py --account Exchange --limit 50
+# Note: Use "ews" if "Exchange" doesn't work (account filtering matches mailbox URLs)
+python3 main.py --account ews --limit 50
 ```
 
 **Show ACTION items from Exchange account:**
 ```bash
-python3 main.py --account Exchange --category ACTION
+# Note: Use "ews" if "Exchange" doesn't work
+python3 main.py --account ews --category ACTION
 ```
 
 **List 50 recent emails with explanations:**
@@ -310,6 +325,13 @@ Available accounts (3):
 Use --account <name> to filter by account.
 Example: python main.py --account Exchange
 ```
+
+**Important Note:** Account filtering matches mailbox URLs, not display names. If `--account Exchange` doesn't work, try:
+- `--account ews` (for Exchange accounts - mailbox URLs use `ews://`)
+- `--account imap` (for IMAP accounts)
+- `--account pop` (for POP accounts)
+
+Check the MAILBOX column in the output to see the actual URL pattern. For example, if you see `ews://494FB4...` in the mailbox column, use `--account ews` instead of `--account Exchange`.
 
 ### Understanding the Output Columns
 
@@ -590,6 +612,65 @@ Use the `--open` flag to open emails directly in your email client:
 
 The tool uses AppleScript to search for and open emails by subject line in the specified email client.
 
+### Workflow Example: List, Select, and Copy Email Content
+
+Here's a complete workflow example showing how to list categorized emails, select one, and copy its content to the clipboard:
+
+**Step 1: List emails with categorization**
+```bash
+python3 main.py --account Exchange --limit 20 --category ACTION
+```
+
+This shows your ACTION items with scores and categories.
+
+**Step 2: Copy email content by index**
+```bash
+# Copy the first email's content to clipboard
+python3 main.py --account ews --category ACTION --copy-index 1
+```
+
+This will:
+1. Use the already-displayed results
+2. Extract full content of email at index 1
+3. Copy it to your clipboard
+
+**Alternative: Search and copy**
+```bash
+# First, note the subject line from the list above, then:
+python3 main.py --search "Meeting Request" --account ews --extract-content --copy-content
+```
+
+This will:
+1. Search for the email by subject keyword
+2. Extract its full content
+3. Copy it to your clipboard
+
+**Complete workflow in one command:**
+```bash
+# List categorized emails, then extract and copy content
+python3 main.py --account ews --limit 10 --category ACTION && \
+python3 main.py --search "meeting" --account ews --extract-content --copy-content
+```
+
+**Alternative: Interactive selection workflow**
+```bash
+# 1. List and categorize emails
+python3 main.py --account ews --limit 20 --category ACTION
+
+# 2. Use interactive selection to find the email subject
+python3 main.py --account ews --limit 20 --open
+
+# 3. Copy content using the subject you found
+python3 main.py --search "Subject from step 2" --account ews --extract-content --copy-content
+```
+
+**Output:**
+```
+Email content copied to clipboard: Meeting Request for Next Week
+```
+
+Now you can paste the email content (Cmd+V) into any application!
+
 ---
 
 ## Architecture
@@ -607,9 +688,10 @@ cli.py                - Argparse and output formatting
 main.py               - Application entry point
 analyze_emails.py     - Email pattern analysis tool (supports both clients)
 analyze_and_update.py - Automated rule updates based on analysis
-read_email.py         - Read full email content for debugging
 open_email.py         - Open emails in email client (Apple Mail/Outlook)
 email_selector.py     - Interactive email selection menu
+applescript_search.py - AppleScript-based email search (real-time)
+ui.py                 - Interactive TUI interface
 ```
 
 No frameworks, no external dependencies—just clear, deterministic Python code.
@@ -1039,14 +1121,20 @@ A: Yes. The tool only reads data and uses SQLite's read-only mode. However, as w
 A: Yes! This is a primary use case. Use:
 ```bash
 python3 main.py --list-accounts          # See your accounts
-python3 main.py --account Exchange       # Filter to Exchange only
+python3 main.py --account ews            # Filter to Exchange (use "ews" not "Exchange")
+python3 main.py --account iCloud         # Filter to iCloud
 ```
 
+**Note:** If `--account Exchange` doesn't work, try `--account ews` - account filtering matches mailbox URLs which use `ews://` for Exchange accounts.
+
 **Q: How does the tool know which account an email belongs to?**  
-A: Apple Mail stores mailbox paths like "Exchange/INBOX" or "iCloud/Sent". The tool extracts the account name from the first part of the path.
+A: The tool filters by matching against mailbox URLs stored in the database. Exchange accounts use `ews://` URLs, IMAP uses `imap://`, etc. The `--account` filter searches for the account name within these URLs, so you may need to use the protocol prefix (e.g., `ews`) rather than the display name (e.g., `Exchange`).
 
 **Q: My Exchange account shows up with a weird name. What do I do?**  
-A: Use `--list-accounts` to see the exact account name, then use that exact string (case-sensitive) with `--account`.
+A: Account filtering matches mailbox URLs, not display names. If `--account Exchange` doesn't work:
+1. Check the MAILBOX column in the output - look for the URL pattern (e.g., `ews://...`)
+2. Use the URL protocol prefix instead: `--account ews` (for Exchange), `--account imap` (for IMAP), etc.
+3. Example: If mailbox shows `ews://494FB4...`, use `--account ews` instead of `--account Exchange`
 
 **Q: Can I filter multiple accounts at once?**  
 A: Not directly, but you can run the tool twice:

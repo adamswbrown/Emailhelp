@@ -61,6 +61,33 @@ Examples:
   
   # Launch TUI with specific client/account
   python main.py --ui --client apple-mail --account Exchange
+  
+  # Search emails by subject keyword (uses AppleScript for real-time results)
+  python main.py --search "meeting"
+  
+  # Search with sender filter
+  python main.py --search "project" --sender "john@example.com"
+  
+  # Search unread emails only
+  python main.py --search "urgent" --unread-only
+  
+  # Use AppleScript for all queries (more reliable, real-time)
+  python main.py --use-applescript --limit 50
+  
+  # Search in specific account
+  python main.py --search "invoice" --account Exchange
+  
+  # Extract full email content as plain text
+  python main.py --search "meeting" --account Exchange --extract-content
+  
+  # Extract content and output raw text (for piping to other apps)
+  python main.py --search "report" --account Work --extract-content --output-raw
+  
+  # Extract content and save to file
+  python main.py --search "invoice" --account Exchange --extract-content --output-file ~/email_content.txt
+  
+  # Copy content of email at index 1 from results to clipboard
+  python main.py --account ews --category ACTION --copy-index 1
             """
         )
         
@@ -166,6 +193,60 @@ Examples:
             '--ui',
             action='store_true',
             help='Launch interactive TUI (Textual-based interface)'
+        )
+        
+        # Search options
+        parser.add_argument(
+            '--search',
+            type=str,
+            metavar='KEYWORD',
+            help='Search emails by subject keyword (case-insensitive, uses AppleScript for real-time results)'
+        )
+        
+        parser.add_argument(
+            '--sender',
+            type=str,
+            metavar='EMAIL',
+            help='Filter emails by sender (works with --search or standalone)'
+        )
+        
+        parser.add_argument(
+            '--use-applescript',
+            action='store_true',
+            help='Use AppleScript to query Mail.app directly (real-time, more reliable than database queries)'
+        )
+        
+        # Content extraction options
+        parser.add_argument(
+            '--extract-content',
+            action='store_true',
+            help='Extract full email content (not just preview). Requires --search. Useful for passing content to other applications.'
+        )
+        
+        parser.add_argument(
+            '--output-raw',
+            action='store_true',
+            help='Output raw email content only (no formatting). Use with --extract-content for piping to other applications.'
+        )
+        
+        parser.add_argument(
+            '--output-file',
+            type=str,
+            metavar='PATH',
+            help='Save email content to file. Use with --extract-content. If multiple emails match, saves each to separate file.'
+        )
+        
+        parser.add_argument(
+            '--copy-content',
+            action='store_true',
+            help='Copy email content to clipboard. Use with --extract-content. If multiple emails match, copies the first one.'
+        )
+        
+        parser.add_argument(
+            '--copy-index',
+            type=int,
+            metavar='INDEX',
+            help='Copy content of email at INDEX to clipboard. Works with displayed results (1-based index).'
         )
         
         return parser

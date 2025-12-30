@@ -21,6 +21,7 @@ This is a read-only, deterministic email accounting tool.
 """
 
 import sys
+import subprocess
 from typing import List, Dict, Any
 
 from email_reader import create_reader
@@ -30,6 +31,13 @@ from classifier import EmailClassifier, EmailCategory
 from cli import CLI, TableFormatter
 from open_email import open_email
 from email_selector import select_email_interactive
+from applescript_search import (
+    search_emails, 
+    list_inbox_emails, 
+    get_accounts as get_applescript_accounts,
+    get_email_content,
+    extract_email_content_as_text
+)
 
 
 def process_emails(
@@ -41,9 +49,9 @@ def process_emails(
     Process messages: extract preview, score, and classify.
     
     Args:
-        messages: Raw message dicts from MailIndexReader
+        messages: Raw message dicts from MailIndexReader or AppleScript search
         scorer: EmailScorer instance
-        show_preview: Whether to extract body previews
+        show_preview: Whether to extract body previews (ignored if preview already exists)
     
     Returns:
         List of enriched email dicts with scores and categories
@@ -54,11 +62,12 @@ def process_emails(
         # Extract fields
         sender = msg.get('sender', '') or ''
         subject = msg.get('subject', '') or ''
-        preview_text = None
         
-        # Extract preview if requested and path available
-        # Note: Outlook uses different message file format, preview extraction may not work
-        if show_preview:
+        # Check for content/preview (AppleScript provides both)
+        preview_text = msg.get('content') or msg.get('preview')
+        
+        # Extract preview if not already present and requested
+        if preview_text is None and show_preview:
             emlx_path = msg.get('emlx_path') or msg.get('message_path')
             if emlx_path:
                 preview_text = EmailPreview.extract_from_emlx(emlx_path)
@@ -125,6 +134,22 @@ def main():
         # Handle --list-accounts flag
         if args.list_accounts:
             print("\nDiscovering accounts...", file=sys.stderr)
+            
+            # Try AppleScript first (more reliable)
+            try:
+                accounts = get_applescript_accounts()
+                if accounts:
+                    print(f"\nAvailable accounts ({len(accounts)}) [via AppleScript]:")
+                    for account in accounts:
+                        print(f"  - {account}")
+                    print("\nUse --account <name> to filter by account.")
+                    print("Example: python main.py --account Exchange")
+                    return 0
+            except Exception as e:
+                print(f"AppleScript account discovery failed: {e}", file=sys.stderr)
+                print("Falling back to database...", file=sys.stderr)
+            
+            # Fall back to database
             with reader:
                 accounts = reader.get_accounts()
             
@@ -132,7 +157,7 @@ def main():
                 print("\nNo accounts found.")
                 return 0
             
-            print(f"\nAvailable accounts ({len(accounts)}):")
+            print(f"\nAvailable accounts ({len(accounts)}) [via database]:")
             for account in accounts:
                 print(f"  - {account}")
             print("\nUse --account <name> to filter by account.")
@@ -154,42 +179,181 @@ def main():
             filter_desc.append(f"last {since_days} days")
         
         filter_str = f" ({', '.join(filter_desc)})" if filter_desc else ""
-        print(f"Querying messages (limit={args.limit}{filter_str})...", file=sys.stderr)
         
-        with reader:
-            # If --open is used without other filters and no results, try without date filter
-            messages = reader.query_messages(
-                limit=args.limit,
-                since_days=since_days,
-                unread_only=args.unread_only,
-                mailbox=args.mailbox,
-                account=args.account
-            )
-            
-            # If no messages found and --open is used, try without date filter to help user
-            if not messages and args.open is not None and since_days:
-                print("No messages found with date filter, trying without date filter...", file=sys.stderr)
+        # Use AppleScript search if --search or --use-applescript is specified
+        use_applescript = args.use_applescript or args.search is not None
+        
+        if use_applescript:
+            print(f"Searching emails via AppleScript (real-time from Mail.app){filter_str}...", file=sys.stderr)
+            try:
+                if args.search:
+                    # Check if we need full content extraction
+                    if args.extract_content:
+                        if not args.account:
+                            print("Error: --extract-content requires --account to be specified", file=sys.stderr)
+                            return 1
+                        
+                        # Get full content (unlimited length)
+                        messages = get_email_content(
+                            account=args.account,
+                            subject_keyword=args.search,
+                            mailbox=args.mailbox or "INBOX",
+                            max_results=args.limit
+                        )
+                        
+                        # Handle content extraction output
+                        if args.output_raw:
+                            # Output raw content only (for piping)
+                            for msg in messages:
+                                content = msg.get('content', msg.get('preview', ''))
+                                print(content)
+                            return 0
+                        
+                        if args.copy_content:
+                            # Copy to clipboard
+                            if not messages:
+                                print("Error: No emails found to copy", file=sys.stderr)
+                                return 1
+                            
+                            msg = messages[0]  # Copy first matching email
+                            content = msg.get('content', msg.get('preview', ''))
+                            
+                            try:
+                                # Use pbcopy on macOS
+                                process = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE, text=True)
+                                process.communicate(input=content)
+                                process.wait()
+                                
+                                if process.returncode == 0:
+                                    print(f"Email content copied to clipboard: {msg.get('subject', 'Unknown')}", file=sys.stderr)
+                                else:
+                                    print("Error: Failed to copy to clipboard", file=sys.stderr)
+                                    return 1
+                            except Exception as e:
+                                print(f"Error copying to clipboard: {e}", file=sys.stderr)
+                                return 1
+                            
+                            return 0
+                        
+                        if args.output_file:
+                            # Save to file(s)
+                            import os
+                            base_path = os.path.expanduser(args.output_file)
+                            
+                            if len(messages) == 1:
+                                # Single file
+                                with open(base_path, 'w', encoding='utf-8') as f:
+                                    msg = messages[0]
+                                    if args.extract_content:
+                                        f.write(f"Subject: {msg.get('subject', '')}\n")
+                                        f.write(f"From: {msg.get('sender', '')}\n")
+                                        f.write(f"Date: {msg.get('date', '')}\n")
+                                        f.write(f"Account: {msg.get('account', '')}\n")
+                                        f.write("\n" + "="*60 + "\n")
+                                        f.write("CONTENT\n")
+                                        f.write("="*60 + "\n\n")
+                                    f.write(msg.get('content', msg.get('preview', '')))
+                                print(f"Content saved to: {base_path}", file=sys.stderr)
+                            else:
+                                # Multiple files
+                                base_name, ext = os.path.splitext(base_path)
+                                for i, msg in enumerate(messages, 1):
+                                    file_path = f"{base_name}_{i}{ext}"
+                                    with open(file_path, 'w', encoding='utf-8') as f:
+                                        f.write(f"Subject: {msg.get('subject', '')}\n")
+                                        f.write(f"From: {msg.get('sender', '')}\n")
+                                        f.write(f"Date: {msg.get('date', '')}\n")
+                                        f.write(f"Account: {msg.get('account', '')}\n")
+                                        f.write("\n" + "="*60 + "\n")
+                                        f.write("CONTENT\n")
+                                        f.write("="*60 + "\n\n")
+                                        f.write(msg.get('content', msg.get('preview', '')))
+                                    print(f"Content saved to: {file_path}", file=sys.stderr)
+                            return 0
+                    else:
+                        # Regular search with preview
+                        messages = search_emails(
+                            account=args.account,
+                            mailbox=args.mailbox or "INBOX",
+                            subject_keyword=args.search,
+                            sender=args.sender,
+                            unread_only=args.unread_only,
+                            max_results=args.limit,
+                            include_content=True,
+                            max_content_length=500
+                        )
+                else:
+                    # Use list_inbox_emails for general listing
+                    messages = list_inbox_emails(
+                        account=args.account,
+                        max_emails=args.limit,
+                        include_read=not args.unread_only
+                    )
+                
+                # Convert AppleScript results to match database format
+                # AppleScript already provides preview, so we're good
+                print(f"Found {len(messages)} messages via AppleScript.", file=sys.stderr)
+            except Exception as e:
+                print(f"AppleScript search failed: {e}", file=sys.stderr)
+                print("Falling back to database query...", file=sys.stderr)
+                use_applescript = False
+        
+        if not use_applescript:
+            print(f"Querying messages from database (limit={args.limit}{filter_str})...", file=sys.stderr)
+            with reader:
+                # If --open is used without other filters and no results, try without date filter
                 messages = reader.query_messages(
                     limit=args.limit,
-                    since_days=None,
+                    since_days=since_days,
                     unread_only=args.unread_only,
                     mailbox=args.mailbox,
                     account=args.account
                 )
+                
+                # Smart fallback: If database returns no results and account is specified,
+                # try AppleScript (database account filtering may be incorrect)
+                if not messages and args.account and not args.use_applescript:
+                    print("No messages found in database. Trying AppleScript for real-time results...", file=sys.stderr)
+                    try:
+                        use_applescript = True
+                        messages = list_inbox_emails(
+                            account=args.account,
+                            max_emails=args.limit,
+                            include_read=not args.unread_only
+                        )
+                        print(f"Found {len(messages)} messages via AppleScript.", file=sys.stderr)
+                    except Exception as e:
+                        print(f"AppleScript fallback failed: {e}", file=sys.stderr)
+                        use_applescript = False
+                
+                # If no messages found and --open is used, try without date filter to help user
+                if not messages and args.open is not None and since_days:
+                    print("No messages found with date filter, trying without date filter...", file=sys.stderr)
+                    messages = reader.query_messages(
+                        limit=args.limit,
+                        since_days=None,
+                        unread_only=args.unread_only,
+                        mailbox=args.mailbox,
+                        account=args.account
+                    )
         
         if not messages:
             print("\nNo messages found matching criteria.")
             return 0
         
-        print(f"Found {len(messages)} messages.", file=sys.stderr)
+        if not use_applescript:
+            print(f"Found {len(messages)} messages.", file=sys.stderr)
+        
         print("Scoring and classifying...\n", file=sys.stderr)
         
         # Initialize scorer
         scorer = EmailScorer(user_name=args.user_name)
         
-        # Process emails (extract preview for better scoring accuracy)
-        # Always extract preview to detect informational patterns in content
-        processed = process_emails(messages, scorer, show_preview=True)
+        # Process emails
+        # For AppleScript results, preview is already included, so we don't need to extract it
+        # For database results, extract preview for better scoring accuracy
+        show_preview = not use_applescript  # AppleScript already includes preview
+        processed = process_emails(messages, scorer, show_preview=show_preview)
         
         # Filter by category if requested
         if args.category:
@@ -206,6 +370,188 @@ def main():
         # Display summary
         summary = TableFormatter.format_summary(processed)
         print(summary)
+        
+        # Handle --copy-index flag (copy content by index)
+        if args.copy_index is not None:
+            if args.copy_index < 1 or args.copy_index > len(processed):
+                print(f"Error: Index {args.copy_index} is out of range (1-{len(processed)})", file=sys.stderr)
+                return 1
+            
+            email_to_copy = processed[args.copy_index - 1]
+            subject = email_to_copy.get('subject', '')
+            
+            # Determine account - try multiple sources
+            account = email_to_copy.get('account', '')
+            
+            # Map URL protocols to account display names
+            mailbox = email_to_copy.get('mailbox', '')
+            url_protocol = None
+            if mailbox and '://' in mailbox:
+                url_protocol = mailbox.split('://')[0].lower()  # Extract protocol (ews, imap, etc.)
+            
+            # Get actual account names from AppleScript
+            from applescript_search import get_accounts
+            applescript_accounts = get_accounts()
+            
+            # Normalize command-line account name
+            cmd_account = args.account.upper() if args.account else None
+            
+            # Map account names/protocols to AppleScript account names
+            account_map = {
+                'EWS': 'Exchange',
+                'ews': 'Exchange',
+                'EXCHANGE': 'Exchange',
+                'exchange': 'Exchange',
+            }
+            
+            # Determine the correct account name
+            if cmd_account and cmd_account in account_map:
+                # Map command-line account to AppleScript name
+                mapped = account_map[cmd_account]
+                if mapped in applescript_accounts:
+                    account = mapped
+            elif args.account and args.account in applescript_accounts:
+                # Use command-line account if it matches AppleScript name
+                account = args.account
+            elif url_protocol == 'ews':
+                # EWS protocol maps to Exchange account
+                if 'Exchange' in applescript_accounts:
+                    account = 'Exchange'
+            elif url_protocol:
+                # Try to find account by protocol
+                protocol_to_account = {
+                    'ews': 'Exchange',
+                }
+                mapped_account = protocol_to_account.get(url_protocol)
+                if mapped_account and mapped_account in applescript_accounts:
+                    account = mapped_account
+            
+            # Fallback: use first account if still not found
+            if not account and applescript_accounts:
+                account = applescript_accounts[0]
+                print(f"Warning: Using first available account: {account}", file=sys.stderr)
+            
+            if not subject:
+                print("Error: Email subject not found", file=sys.stderr)
+                return 1
+            
+            if not account:
+                print("Error: Email account not found. Please specify --account", file=sys.stderr)
+                print(f"Available accounts: {', '.join(applescript_accounts)}", file=sys.stderr)
+                return 1
+            
+            print(f"\nExtracting content for email #{args.copy_index}: {subject[:50]}...", file=sys.stderr)
+            print(f"Using account: {account}", file=sys.stderr)
+            
+            try:
+                # Use AppleScript to get full content
+                from applescript_search import get_email_content
+                
+                # Extract mailbox name from URL if needed
+                mailbox_name = "INBOX"  # Default to INBOX
+                if '://' in mailbox:
+                    # Try to extract mailbox name from URL if possible
+                    # For now, default to INBOX
+                    mailbox_name = "INBOX"
+                else:
+                    mailbox_name = mailbox
+                
+                # Search for the email by subject to get full content
+                # Clean subject for better matching (remove brackets, external tags, etc.)
+                clean_subject = subject.replace('[External]', '').replace('[', '').replace(']', '').strip()
+                subject_words = clean_subject.split()
+                
+                # Use a meaningful keyword - prefer words that are likely unique
+                # Skip common words like "Availability", "for", "a"
+                skip_words = {'for', 'a', 'an', 'the', 'of', 'in', 'on', 'at', 'to', 'with'}
+                search_keyword = None
+                for word in subject_words:
+                    if word.lower() not in skip_words and len(word) > 3:
+                        search_keyword = word
+                        break
+                
+                # Fallback to first word if all are skipped
+                if not search_keyword and subject_words:
+                    search_keyword = subject_words[0]
+                elif not search_keyword:
+                    search_keyword = subject[:30]
+                
+                print(f"Searching with keyword: '{search_keyword}'", file=sys.stderr)
+                
+                messages = get_email_content(
+                    account=account,
+                    subject_keyword=search_keyword,
+                    mailbox=mailbox_name,
+                    max_results=20  # Get more to find exact match
+                )
+                
+                # Find the exact matching email by comparing full subject
+                matching_email = None
+                if messages:
+                    print(f"Found {len(messages)} matching emails, searching for exact subject match...", file=sys.stderr)
+                    for msg in messages:
+                        msg_subject = msg.get('subject', '').strip()
+                        if msg_subject == subject.strip():
+                            matching_email = msg
+                            print(f"Found exact match: {msg_subject[:50]}...", file=sys.stderr)
+                            break
+                    
+                    # If no exact match, try first result
+                    if not matching_email:
+                        matching_email = messages[0]
+                        print(f"Warning: Using first matching email (subject may differ)", file=sys.stderr)
+                        print(f"  Expected: {subject[:50]}...", file=sys.stderr)
+                        print(f"  Found: {matching_email.get('subject', '')[:50]}...", file=sys.stderr)
+                else:
+                    print(f"Warning: No emails found with keyword '{search_keyword}'. Trying broader search...", file=sys.stderr)
+                    # Try searching without account filter
+                    try:
+                        messages = get_email_content(
+                            account=None,  # Search all accounts
+                            subject_keyword=search_keyword,
+                            mailbox=mailbox_name,
+                            max_results=20
+                        )
+                        if messages:
+                            for msg in messages:
+                                if msg.get('subject', '').strip() == subject.strip():
+                                    matching_email = msg
+                                    break
+                            if not matching_email and messages:
+                                matching_email = messages[0]
+                    except Exception as e:
+                        print(f"Broader search also failed: {e}", file=sys.stderr)
+                
+                if not matching_email:
+                    print("Error: Could not retrieve email content", file=sys.stderr)
+                    print(f"  Account used: {account}", file=sys.stderr)
+                    print(f"  Search keyword: {search_keyword}", file=sys.stderr)
+                    print(f"  Subject: {subject}", file=sys.stderr)
+                    return 1
+                
+                content = matching_email.get('content', matching_email.get('preview', ''))
+                
+                if not content:
+                    print("Error: Email content is empty", file=sys.stderr)
+                    return 1
+                
+                # Copy to clipboard
+                process = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE, text=True)
+                process.communicate(input=content)
+                process.wait()
+                
+                if process.returncode == 0:
+                    print(f"✓ Email content copied to clipboard: {subject}", file=sys.stderr)
+                    return 0
+                else:
+                    print("Error: Failed to copy to clipboard", file=sys.stderr)
+                    return 1
+                    
+            except Exception as e:
+                print(f"Error copying email content: {e}", file=sys.stderr)
+                import traceback
+                traceback.print_exc(file=sys.stderr)
+                return 1
         
         # Handle --open flag (interactive or by index)
         if args.open is not None:
