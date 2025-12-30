@@ -86,14 +86,44 @@ def main():
         print("Locating Apple Mail Envelope Index...", file=sys.stderr)
         reader = MailIndexReader(db_path=args.db_path)
         
+        # Handle --list-accounts flag
+        if args.list_accounts:
+            print("\nDiscovering accounts from mailbox paths...", file=sys.stderr)
+            with reader:
+                accounts = reader.get_accounts()
+            
+            if not accounts:
+                print("\nNo accounts found.")
+                return 0
+            
+            print(f"\nAvailable accounts ({len(accounts)}):")
+            for account in accounts:
+                print(f"  - {account}")
+            print("\nUse --account <name> to filter by account.")
+            print("Example: python main.py --account Exchange")
+            return 0
+        
         # Query messages
-        print(f"Querying messages (limit={args.limit})...", file=sys.stderr)
+        filter_desc = []
+        if args.account:
+            filter_desc.append(f"account={args.account}")
+        if args.mailbox:
+            filter_desc.append(f"mailbox={args.mailbox}")
+        if args.unread_only:
+            filter_desc.append("unread only")
+        if args.since:
+            filter_desc.append(f"last {args.since} days")
+        
+        filter_str = f" ({', '.join(filter_desc)})" if filter_desc else ""
+        print(f"Querying messages (limit={args.limit}{filter_str})...", file=sys.stderr)
+        
         with reader:
             messages = reader.query_messages(
                 limit=args.limit,
                 since_days=args.since,
                 unread_only=args.unread_only,
-                mailbox=args.mailbox
+                mailbox=args.mailbox,
+                account=args.account
             )
         
         if not messages:
