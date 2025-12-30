@@ -1,10 +1,36 @@
-# Email Accounting & Categorization CLI
+# Email Accounting & Categorization CLI + Native App
 
 > **Treat email as records to be accounted for, not messages to be read.**
 
-A local, deterministic command-line tool for email accounting and triage on macOS. Supports both **Apple Mail** and **Outlook for Mac**. Built specifically for users with multiple email accounts (personal + work) who need fast, explainable email classification without AI or external services.
+A local, deterministic tool for email accounting and triage on macOS. Available as both a **command-line tool** and a **native macOS desktop application**. Supports **Apple Mail** and **Outlook for Mac**. Built for users with multiple email accounts (personal + work) who need fast, explainable email classification without AI or external services.
 
-## Quick Start
+## 🚀 Two Ways to Use
+
+### 1. Native macOS App (New!) 🎉
+
+**Desktop application with in-app reply functionality:**
+
+```bash
+# Install PyWebView
+pip3 install pywebview
+
+# Run the native app
+python3 main_app.py --account Exchange
+```
+
+**Features:**
+- ✉️ **Reply in-app** - Compose and send without leaving the app
+- 🤖 **GPT integration** - One-click export for ChatGPT drafting
+- ✅ **Mark as done** - Track completed emails
+- 🔄 **Auto-refresh** - New emails every 3 minutes
+- 📋 **Quick templates** - 6 pre-built reply templates
+- 🎨 **Native UI** - Beautiful macOS-style interface
+
+[📖 Full App Documentation →](#native-macos-app)
+
+### 2. Command-Line Interface (CLI)
+
+**Fast terminal-based email triage:**
 
 ```bash
 # List your 20 most recent emails
@@ -16,20 +42,11 @@ python3 main.py --list-accounts
 # Show ACTION items from Exchange account only
 python3 main.py --account Exchange --category ACTION
 
-# Use Outlook instead of Apple Mail
-python3 main.py --client outlook --limit 20
-
-# Auto-detect email client (default)
-python3 main.py --client auto
-
 # Show scoring breakdown
 python3 main.py --limit 10 --why
 
 # Analyze your email patterns
 python3 analyze_emails.py --since 30
-
-# Automatically update rules based on your emails
-python3 analyze_and_update.py --since 30
 ```
 
 ## Table of Contents
@@ -86,14 +103,21 @@ This CLI application reads Apple Mail's internal SQLite database (Envelope Index
 
 ## Requirements
 
+### For CLI Tool
 - **macOS** (latest versions)
 - **Apple Mail.app** OR **Outlook for Mac** installed and configured
 - **Python 3.7+**
-- No external dependencies (uses Python standard library only)
+- **No external dependencies** (uses Python standard library only)
+
+### For Native App (Additional)
+- **PyWebView 4.0+** - `pip3 install pywebview`
+- All CLI requirements above
 
 ---
 
 ## Installation
+
+### CLI Tool (No Dependencies)
 
 1. Clone or download this repository:
 ```bash
@@ -110,6 +134,23 @@ chmod +x main.py
 ```bash
 python3 --version  # Should be 3.7 or higher
 ```
+
+### Native App (With PyWebView)
+
+Follow CLI installation steps above, then:
+
+```bash
+# Install PyWebView
+pip3 install pywebview
+
+# Verify installation
+python3 -c "import webview; print('PyWebView ready!')"
+
+# Run the app
+python3 main_app.py
+```
+
+See [NATIVE_APP_SETUP.md](NATIVE_APP_SETUP.md) for complete native app documentation.
 
 ---
 
@@ -344,6 +385,136 @@ Score 10 = Bulk sender (-30) + Newsletter (-20) + Has unsubscribe (-40)
 
 ---
 
+## Native macOS App
+
+### Overview
+
+The native desktop application provides a visual workspace for email triage with full reply functionality. Built with PyWebView for a true native macOS experience.
+
+### Features
+
+#### 1. In-App Email Replies
+
+**Three reply workflows:**
+
+**A. Send Directly (Fastest)**
+```
+1. Click "Reply" on any email
+2. Type response or select quick template
+3. Click "Send Now"
+4. Email sent via Mail.app in background
+5. Automatically marked as done
+```
+
+**B. Edit in Mail.app (More Control)**
+```
+1. Click "Reply" on email
+2. Draft in app
+3. Click "Edit in Mail.app"
+4. Add formatting, attachments in Mail.app
+5. Send from Mail.app
+```
+
+**C. GPT-Assisted (Best Quality)**
+```
+1. Click "Reply" on email
+2. Click "Draft with GPT"
+3. Context copied to clipboard
+4. Paste into ChatGPT
+5. Copy GPT's reply back
+6. Edit and send
+```
+
+#### 2. Quick Reply Templates
+
+Six pre-built templates for common responses:
+- **Will Review** - Acknowledge receipt, promise review
+- **Need More Info** - Request additional details
+- **Following Up** - Check on previous message
+- **Thanks** - Simple acknowledgment
+- **Schedule Meeting** - Propose scheduling a call
+- **Acknowledged** - Confirm receipt
+
+Click any template to insert, then customize.
+
+#### 3. GPT Integration
+
+**Two export modes:**
+
+**Copy to GPT (Analysis):**
+- Full email context with scoring signals
+- Use for analysis, summarization, advice
+- One-click clipboard copy
+
+**Draft with GPT:**
+- Formatted prompt requesting reply draft
+- ChatGPT generates professional response
+- Paste back into app, edit, send
+
+#### 4. Task Management
+
+- **Mark as Done** - Hide completed ACTION items
+- **Persistent** - Tracked across app restarts
+- **Filter active** - See only what needs attention
+- **Unmark** - Bring emails back if needed
+
+#### 5. Auto-Refresh
+
+- Checks for new emails every 3 minutes
+- Toggle on/off in header
+- Manual refresh button available
+- Status updates in real-time
+
+### Running the Native App
+
+```bash
+# Basic usage
+python3 main_app.py
+
+# Specify email client
+python3 main_app.py --client apple-mail
+python3 main_app.py --client outlook
+
+# Default account
+python3 main_app.py --account Exchange
+
+# Combined
+python3 main_app.py --client apple-mail --account Exchange
+```
+
+### App Interface
+
+```
+┌─────────────────────────────────────────────┐
+│ 📧 Email Triage          🔄 Refresh         │
+│ Last updated: 2 mins ago                    │
+├─────────────────────────────────────────────┤
+│ 🔴 ACTION (12)  🟡 FYI (8)  ⚪ IGNORE (45) │
+├─────────────────────────────────────────────┤
+│                                             │
+│ 🔴 ACTION - Needs Your Attention           │
+│ ┌─────────────────────────────────────────┐│
+│ │ partner@company.com          Score: 72  ││
+│ │ DMC vs Azure Migrate?         2 hrs ago ││
+│ │                                          ││
+│ │ Can you review the migration options... ││
+│ │                                          ││
+│ │ [✉️ Reply] [📋 GPT] [🤖 Draft] [✅ Done]││
+│ └─────────────────────────────────────────┘│
+└─────────────────────────────────────────────┘
+```
+
+### Complete App Documentation
+
+See [NATIVE_APP_SETUP.md](NATIVE_APP_SETUP.md) for:
+- Detailed setup instructions
+- Reply workflow examples
+- Troubleshooting guide
+- Architecture overview
+- Advanced features
+
+---
+
 ## Multiple Email Accounts Support
 
 ### Overview
@@ -541,7 +712,9 @@ For the `--why` flag, the tool may read `.emlx` files to extract body previews:
 
 ## Architecture
 
-The tool is organized into simple, focused modules:
+### CLI Tool
+
+The command-line tool is organized into simple, focused modules:
 
 ```
 email_reader.py       - Unified interface for Apple Mail and Outlook
@@ -551,13 +724,46 @@ preview.py            - .emlx body preview extraction
 scoring.py            - Weighted signal scoring (WSS)
 classifier.py         - Score-to-category mapping
 cli.py                - Argparse and output formatting
-main.py               - Application entry point
+main.py               - CLI application entry point
 analyze_emails.py     - Email pattern analysis tool
 analyze_and_update.py - Automated rule updates based on analysis
 read_email.py         - Read full email content for debugging
 ```
 
-No frameworks, no external dependencies—just clear, deterministic Python code.
+### Native macOS App
+
+The desktop application adds:
+
+```
+main_app.py           - Native app entry point (PyWebView)
+reply_handler.py      - AppleScript email reply integration
+actions/
+  ├── gpt_export.py   - Format emails for ChatGPT
+  └── mark_done.py    - Track completed emails
+ui/
+  ├── dashboard.html  - Main application interface
+  ├── style.css       - Native macOS styling
+  └── app.js          - Frontend interactions
+```
+
+**Architecture Overview:**
+```
+┌─────────────────────────────────────┐
+│   Native macOS Window (PyWebView)   │
+├─────────────────────────────────────┤
+│  HTML/CSS/JS UI (ui/dashboard.html) │
+│             ↕ JavaScript API         │
+│  Python Backend (main_app.py)       │
+│             ↕                        │
+│  Email Database Access              │
+│  (mail_index.py / outlook_index.py) │
+│             ↕                        │
+│  Scoring & Classification           │
+│  (scoring.py / classifier.py)       │
+└─────────────────────────────────────┘
+```
+
+No frameworks, minimal dependencies—just clear, deterministic Python code.
 
 ---
 
@@ -958,20 +1164,26 @@ This tool is designed to be simple and maintainable. Contributions should:
 
 ### General Questions
 
+**Q: Should I use the CLI or the Native App?**  
+A: 
+- **CLI** for quick checks, scripting, automation, or if you don't want dependencies
+- **Native App** for interactive triage, replying to emails, and daily workflow
+- Both use the same core logic and can be used interchangeably
+
 **Q: Will this tool modify my emails or mailboxes?**  
-A: No. The tool opens the database in read-only mode (`mode=ro`) and never writes anything. It's 100% safe.
+A: The **CLI tool** is 100% read-only. The **Native App** can send replies via AppleScript, but only when you explicitly click "Send". All email reading is read-only (`mode=ro`).
 
 **Q: Does this send data to any servers?**  
-A: No. All processing is 100% local. No network calls are made. Your email data never leaves your machine.
+A: No. All processing is 100% local. No network calls are made. Your email data never leaves your machine. GPT integration copies to clipboard for you to paste manually.
 
-**Q: Why not use AppleScript?**  
-A: AppleScript is 10-100x slower for bulk operations. Direct SQLite access to the Envelope Index is much faster and doesn't require Apple Mail to be running.
+**Q: Why not use AppleScript for reading emails?**  
+A: AppleScript is 10-100x slower for bulk operations. Direct SQLite access is much faster. However, we DO use AppleScript for sending replies (in the native app).
 
 **Q: Can I use this with other email clients?**  
-A: No, this is specifically designed for Apple Mail's database format. Other clients (Outlook, Thunderbird) use different storage systems.
+A: Currently supports Apple Mail and Outlook for Mac. Other clients (Thunderbird, etc.) use different storage systems.
 
 **Q: Is this safe to run?**  
-A: Yes. The tool only reads data and uses SQLite's read-only mode. However, as with any software, use at your own risk and always keep backups.
+A: Yes. Reading is 100% safe (read-only mode). Replying uses native Mail.app/Outlook, same as if you sent manually. As with any software, use at your own risk and keep backups.
 
 ---
 
@@ -1032,25 +1244,44 @@ A: By design. This tool prioritizes:
 
 ---
 
+### Native App Questions
+
+**Q: How do I reply to emails in the native app?**  
+A: Click "Reply" on any email card. Compose your reply (or use a template), then click "Send Now" to send via AppleScript or "Edit in Mail.app" to finish in Mail.
+
+**Q: Can I add attachments to replies?**  
+A: Use the "Edit in Mail.app" button to open the reply in Mail.app, where you can add attachments, formatting, and more.
+
+**Q: Does the native app work with Outlook?**  
+A: Yes, but with limited functionality. Outlook's AppleScript support is minimal, so replies open a mailto: compose window.
+
+**Q: How does GPT integration work?**  
+A: Click "Draft with GPT" to copy email context to clipboard. Paste into ChatGPT, get a draft reply, copy it back, paste into the app, and send.
+
+**Q: Will the app notify me of new ACTION emails?**  
+A: Not yet. This is a planned future feature. Currently, auto-refresh updates the list every 3 minutes.
+
 ### Technical Questions
 
 **Q: What Python version do I need?**  
 A: Python 3.7 or higher. Check with: `python3 --version`
 
 **Q: Do I need to install any packages?**  
-A: No. The tool uses only Python's standard library (sqlite3, email, argparse, etc.). No pip install needed.
+A: 
+- **CLI tool**: No packages needed (Python standard library only)
+- **Native app**: Only PyWebView (`pip3 install pywebview`)
 
 **Q: Can I run this on Linux or Windows?**  
 A: No. This is macOS-specific because it reads Apple Mail's proprietary database format.
 
 **Q: Does Apple Mail need to be running?**  
-A: No. The tool accesses the database directly. Apple Mail can be closed.
+A: No for reading emails. Yes for sending replies (Mail.app/Outlook sends the actual email via AppleScript).
 
 **Q: What if Apple changes the database schema?**  
 A: The tool queries defensively and handles missing columns gracefully. It should continue working across schema changes, though specific features might break.
 
 **Q: How fast is it?**  
-A: Very fast. Querying 1000 emails typically takes < 1 second. Using `--why` (which reads .emlx files) is slower but still reasonable for ~50-100 emails.
+A: Very fast. Querying 1000 emails typically takes < 1 second. The native app loads instantly. Using `--why` (which reads .emlx files) is slower but still reasonable for ~50-100 emails.
 
 **Q: Can I run this as a cron job?**  
 A: Yes, but output is designed for terminal display. Consider redirecting output:
