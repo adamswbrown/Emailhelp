@@ -67,6 +67,8 @@ python3 main.py
 --since DAYS          Only show emails from the last N days
 --unread-only         Only show unread emails
 --mailbox NAME        Filter by mailbox name (e.g., "Inbox")
+--account NAME        Filter by account name (e.g., "Exchange", "iCloud")
+--list-accounts       List all available accounts and exit
 --category CATEGORY   Filter by classification (ACTION, FYI, or IGNORE)
 --why                 Show signal breakdown and score explanation
 --user-name NAME      Your name (to detect personal mentions in scoring)
@@ -75,14 +77,29 @@ python3 main.py
 
 ### Example Commands
 
+**Discover available accounts:**
+```bash
+python3 main.py --list-accounts
+```
+
+**Filter by Exchange account only:**
+```bash
+python3 main.py --account Exchange --limit 50
+```
+
+**Show ACTION items from Exchange account:**
+```bash
+python3 main.py --account Exchange --category ACTION
+```
+
 **List 50 recent emails with explanations:**
 ```bash
 python3 main.py --limit 50 --why
 ```
 
-**Show only unread emails from last 7 days:**
+**Show only unread emails from last 7 days in Exchange:**
 ```bash
-python3 main.py --unread-only --since 7
+python3 main.py --unread-only --since 7 --account Exchange
 ```
 
 **Filter by mailbox:**
@@ -192,6 +209,69 @@ Score 50 = Direct sender (+20) + Trusted domain (+10) + Reply (+10)
 Score 10 = Bulk sender (-30) + Newsletter (-20) + Has unsubscribe (-40)
            → IGNORE
 ```
+
+---
+
+## Multiple Email Accounts Support
+
+### Overview
+
+If you have multiple email accounts configured in Apple Mail (e.g., personal iCloud, work Exchange, Gmail), you can filter by specific accounts using the `--account` flag.
+
+### Discovering Your Accounts
+
+First, discover which accounts are available:
+
+```bash
+python3 main.py --list-accounts
+```
+
+**Example output:**
+```
+Available accounts (3):
+  - Exchange
+  - iCloud
+  - Gmail
+
+Use --account <name> to filter by account.
+Example: python main.py --account Exchange
+```
+
+### How Account Filtering Works
+
+Apple Mail stores mailbox paths that typically include the account name. For example:
+- `Exchange/INBOX`
+- `iCloud/Sent`
+- `Gmail/Archive`
+
+The tool extracts account names from these paths and allows you to filter messages accordingly.
+
+### Use Cases
+
+**Work Email Only (Exchange):**
+```bash
+# Focus only on your Exchange work emails
+python3 main.py --account Exchange --category ACTION --limit 50
+```
+
+**Personal Email Only (iCloud):**
+```bash
+# Check your personal iCloud account
+python3 main.py --account iCloud --unread-only
+```
+
+**Combine with Other Filters:**
+```bash
+# Unread ACTION items from Exchange in the last 3 days
+python3 main.py --account Exchange --unread-only --since 3 --category ACTION
+```
+
+### Important Notes
+
+- Account filtering uses pattern matching on mailbox paths
+- If your Exchange account has a specific name, use that (e.g., "work@company.com")
+- Use `--list-accounts` first to see the exact account names in your system
+- You can combine `--account` with `--mailbox` for even more specific filtering
 
 ---
 

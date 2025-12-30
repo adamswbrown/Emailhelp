@@ -29,17 +29,23 @@ Examples:
   # List 20 most recent emails
   python main.py
   
+  # List emails from Exchange account only
+  python main.py --account Exchange --limit 50
+  
+  # List available accounts
+  python main.py --list-accounts
+  
   # List 50 recent emails with explanations
   python main.py --limit 50 --why
   
-  # Show only unread emails from last 7 days
-  python main.py --unread-only --since 7
+  # Show only unread emails from last 7 days in Exchange
+  python main.py --unread-only --since 7 --account Exchange
   
   # Filter by mailbox
   python main.py --mailbox Inbox --limit 30
   
-  # Show only ACTION items
-  python main.py --category ACTION
+  # Show only ACTION items from Exchange
+  python main.py --category ACTION --account Exchange
             """
         )
         
@@ -68,6 +74,18 @@ Examples:
             '--mailbox',
             type=str,
             help='Filter by mailbox name (e.g., "Inbox")'
+        )
+        
+        parser.add_argument(
+            '--account',
+            type=str,
+            help='Filter by account name (e.g., "Exchange", "iCloud")'
+        )
+        
+        parser.add_argument(
+            '--list-accounts',
+            action='store_true',
+            help='List all available accounts and exit'
         )
         
         parser.add_argument(

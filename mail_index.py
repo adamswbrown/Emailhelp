@@ -118,7 +118,8 @@ class MailIndexReader:
         limit: int = 20,
         since_days: Optional[int] = None,
         unread_only: bool = False,
-        mailbox: Optional[str] = None
+        mailbox: Optional[str] = None,
+        account: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Query messages from the Envelope Index.
@@ -128,6 +129,7 @@ class MailIndexReader:
             since_days: Only return messages from the last N days
             unread_only: Only return unread messages
             mailbox: Filter by mailbox name (e.g., "Inbox")
+            account: Filter by account name (e.g., "Exchange", "iCloud")
         
         Returns:
             List of message dictionaries with available metadata.
@@ -176,7 +178,8 @@ class MailIndexReader:
             'remote_id': 'remote_id',
             'sender_address': 'sender_address', 
             'date_sent': 'date_sent',
-            'flags': 'flags'
+            'flags': 'flags',
+            'account': 'account'  # Account name (Exchange, iCloud, etc.)
         }
         
         for col, alias in optional_columns.items():
@@ -200,6 +203,13 @@ class MailIndexReader:
         if mailbox:
             where_clauses.append("mailbox LIKE ?")
             params.append(f"%{mailbox}%")
+        
+        if account:
+            # Filter by account name (Exchange, iCloud, Gmail, etc.)
+            # Account filtering works by checking the mailbox path
+            # Exchange mailboxes typically contain the account name in their path
+            where_clauses.append("mailbox LIKE ?")
+            params.append(f"%{account}%")
         
         where_clause = " AND ".join(where_clauses) if where_clauses else "1=1"
         
@@ -248,7 +258,44 @@ class MailIndexReader:
         
         # Try to find mailbox column
         try:
-            cursor.execute("SELECT DISTINCT mailbox FROM messages WHERE mailbox IS NOT NULL")
+            cursor.execute("SELECT DISTINCT mailbox FROM messages WHERE mailbox IS NOT NULL ORDER BY mailbox")
             return [row[0] for row in cursor.fetchall()]
+        except sqlite3.Error:
+            return []
+    
+    def get_accounts(self) -> List[str]:
+        """
+        Get list of unique account names from mailbox paths.
+        
+        Apple Mail typically stores mailboxes with account names in the path.
+        For example: "Exchange/INBOX" or "iCloud/Sent"
+        
+        Returns:
+            List of account names extracted from mailbox paths.
+        """
+        self.connect()
+        cursor = self.connection.cursor()
+        
+        try:
+            # Get all distinct mailbox paths
+            cursor.execute("SELECT DISTINCT mailbox FROM messages WHERE mailbox IS NOT NULL")
+            mailboxes = [row[0] for row in cursor.fetchall()]
+            
+            # Extract account names (typically the first part of the path)
+            accounts = set()
+            for mailbox in mailboxes:
+                if not mailbox:
+                    continue
+                
+                # Split by common path separators
+                parts = mailbox.replace('\\', '/').split('/')
+                
+                # The account name is usually the first non-empty part
+                for part in parts:
+                    if part and not part.startswith('.'):
+                        accounts.add(part)
+                        break
+            
+            return sorted(list(accounts))
         except sqlite3.Error:
             return []
