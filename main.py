@@ -28,6 +28,8 @@ from preview import EmailPreview
 from scoring import EmailScorer
 from classifier import EmailClassifier, EmailCategory
 from cli import CLI, TableFormatter
+from open_email import open_email
+from email_selector import select_email_interactive
 
 
 def process_emails(
@@ -137,6 +139,7 @@ def main():
         print(f"Querying messages (limit={args.limit}{filter_str})...", file=sys.stderr)
         
         with reader:
+            # If --open is used without other filters and no results, try without date filter
             messages = reader.query_messages(
                 limit=args.limit,
                 since_days=since_days,
@@ -144,6 +147,17 @@ def main():
                 mailbox=args.mailbox,
                 account=args.account
             )
+            
+            # If no messages found and --open is used, try without date filter to help user
+            if not messages and args.open is not None and since_days:
+                print("No messages found with date filter, trying without date filter...", file=sys.stderr)
+                messages = reader.query_messages(
+                    limit=args.limit,
+                    since_days=None,
+                    unread_only=args.unread_only,
+                    mailbox=args.mailbox,
+                    account=args.account
+                )
         
         if not messages:
             print("\nNo messages found matching criteria.")
@@ -174,6 +188,33 @@ def main():
         # Display summary
         summary = TableFormatter.format_summary(processed)
         print(summary)
+        
+        # Handle --open flag (interactive or by index)
+        if args.open is not None:
+            if args.open == 0:
+                # Interactive selection
+                email_to_open = select_email_interactive(processed)
+                if not email_to_open:
+                    return 0  # User cancelled
+            else:
+                # Direct index selection
+                if args.open < 1 or args.open > len(processed):
+                    print(f"Error: Index {args.open} is out of range (1-{len(processed)})", file=sys.stderr)
+                    return 1
+                email_to_open = processed[args.open - 1]
+            
+            # Determine which client to use for opening
+            open_client = args.open_client if args.open_client else 'apple-mail'
+            
+            print(f"\nOpening email in {open_client}...", file=sys.stderr)
+            success = open_email(email_to_open, client=open_client)
+            
+            if success:
+                print("Email opened successfully.", file=sys.stderr)
+                return 0
+            else:
+                print("Failed to open email.", file=sys.stderr)
+                return 1
         
         return 0
         

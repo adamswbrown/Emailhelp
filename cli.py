@@ -46,6 +46,15 @@ Examples:
   
   # Show only ACTION items from Exchange
   python main.py --category ACTION --account Exchange
+  
+  # Interactive email selection (shows menu to choose)
+  python main.py --limit 10 --open
+  
+  # Open the 3rd email directly by index
+  python main.py --limit 10 --open 3
+  
+  # Open email in Outlook instead
+  python main.py --limit 10 --open 3 --open-client outlook
             """
         )
         
@@ -80,8 +89,8 @@ Examples:
         parser.add_argument(
             '--mailbox',
             type=str,
-            default='Inbox',
-            help='Filter by mailbox name (default: Inbox, use --mailbox "" to include all mailboxes)'
+            default=None,
+            help='Filter by mailbox name (default: all mailboxes, use --mailbox Inbox to filter)'
         )
         
         parser.add_argument(
@@ -128,6 +137,23 @@ Examples:
             choices=['apple-mail', 'outlook', 'auto'],
             default='auto',
             help='Email client to use: apple-mail, outlook, or auto (default: auto-detect)'
+        )
+        
+        parser.add_argument(
+            '--open',
+            type=int,
+            metavar='INDEX',
+            nargs='?',
+            const=0,
+            help='Open email interactively (--open) or at INDEX (--open INDEX). Use --open 0 or just --open for interactive selection'
+        )
+        
+        parser.add_argument(
+            '--open-client',
+            type=str,
+            choices=['apple-mail', 'outlook'],
+            default='apple-mail',
+            help='Email client to use for --open (default: apple-mail)'
         )
         
         return parser

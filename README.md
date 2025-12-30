@@ -25,11 +25,18 @@ python3 main.py --client auto
 # Show scoring breakdown
 python3 main.py --limit 10 --why
 
-# Analyze your email patterns
-python3 analyze_emails.py --since 30
+# Interactive email selection - choose which email to open
+python3 main.py --limit 10 --open
 
-# Automatically update rules based on your emails
-python3 analyze_and_update.py --since 30
+# Open a specific email by index in Apple Mail (default)
+python3 main.py --limit 10 --open 3
+
+# Open email in Outlook instead
+python3 main.py --limit 10 --open 3 --open-client outlook
+
+# Analyze your email patterns (supports both Apple Mail and Outlook)
+python3 analyze_emails.py --client apple-mail --since 30
+python3 analyze_emails.py --client outlook --all
 ```
 
 ## Table of Contents
@@ -54,16 +61,19 @@ python3 analyze_and_update.py --since 30
 
 ## Overview
 
-This CLI application reads Apple Mail's internal SQLite database (Envelope Index) to perform fast, indexed email analysis. It scores emails using transparent weighted signals and classifies them into actionable categories.
+This CLI application reads email metadata from Apple Mail's Envelope Index or Outlook's SQLite database to perform fast, indexed email analysis. It scores emails using transparent weighted signals and classifies them into actionable categories. Supports both Apple Mail and Outlook for Mac.
 
 ### What it does
 
-- ✅ **Read-only access** to Apple Mail metadata (never modifies emails)
+- ✅ **Read-only access** to email metadata (never modifies emails)
+- ✅ **Supports both Apple Mail and Outlook for Mac**
 - ✅ **Deterministic scoring** based on explicit, auditable signals
 - ✅ **Multi-account support** (Exchange, iCloud, Gmail, etc.)
 - ✅ **Fast queries** using SQLite indexes (thousands of emails in seconds)
 - ✅ **Ledger-style output** for accounting-based email triage
 - ✅ **Explainable results** with `--why` flag showing score breakdowns
+- ✅ **Interactive email selection** with `--open` flag
+- ✅ **Open emails in email client** directly from the command line
 - ✅ **Zero dependencies** (uses Python standard library only)
 
 ### What it does NOT do
@@ -126,13 +136,16 @@ python3 main.py
 
 ```
 --limit N              Maximum number of emails to display (default: 20)
---since DAYS          Only show emails from the last N days
+--since DAYS          Only show emails from the last N days (default: 365)
+--all                  Show all emails regardless of date
 --unread-only         Only show unread emails
 --mailbox NAME        Filter by mailbox name (e.g., "Inbox")
 --account NAME        Filter by account name (e.g., "Exchange", "iCloud")
 --list-accounts       List all available accounts and exit
 --category CATEGORY   Filter by classification (ACTION, FYI, or IGNORE)
 --client CLIENT       Email client: apple-mail, outlook, or auto (default: auto)
+--open [INDEX]        Interactive email selection (--open) or open email at INDEX (--open INDEX)
+--open-client CLIENT   Email client for --open: apple-mail or outlook (default: apple-mail)
 --why                 Show signal breakdown and score explanation
 --user-name NAME      Your name (to detect personal mentions in scoring)
 --db-path PATH        Explicit path to email database (auto-detects if not provided)
@@ -178,6 +191,26 @@ python3 main.py --category ACTION
 **Show only IGNORE items (bulk/automated emails):**
 ```bash
 python3 main.py --category IGNORE --limit 100
+```
+
+**Interactive email selection - choose which email to open:**
+```bash
+python3 main.py --limit 10 --open
+```
+
+**Open a specific email by index in Apple Mail:**
+```bash
+python3 main.py --limit 10 --open 3
+```
+
+**Open email in Outlook instead:**
+```bash
+python3 main.py --limit 10 --open 3 --open-client outlook
+```
+
+**Show all emails (no date filter):**
+```bash
+python3 main.py --all --limit 50
 ```
 
 ---
@@ -276,7 +309,7 @@ Example: python main.py --account Exchange
 
 | Column | Description | Example |
 |--------|-------------|---------|
-| **DATE** | Date email was received | `2025-01-10` |
+| **DATE** | Date email was received (UK format dd/mm/yyyy) | `17/03/2025` |
 | **FROM** | Sender domain or address | `partner.com` |
 | **SUBJECT** | Email subject (truncated to 35 chars) | `DMC vs Azure Migrate` |
 | **SCORE** | Weighted signal score (0-100) | `72` |
@@ -313,9 +346,10 @@ Emails are scored 0-100 using explicit, deterministic signals. All scoring is tr
 
 | Signal | Points | Description |
 |--------|--------|-------------|
-| Action phrases | +20 | Contains "can you", "could you", "please advise", "urgent", "deadline", etc. |
+| Action phrases | +20 | Contains "can you", "could you", "please advise", "urgent", "deadline", "call", "meeting", "approve", "review", etc. |
 | Mentions your name | +15 | Body preview mentions your name (use `--user-name` flag) |
-| Informational notice | -15 | Contains license expiration, renewal notices, "will expire soon", etc. |
+| Jira automated | -30 | Automated Jira follow-up emails ("following up on your recent support request", "will be closed automatically", etc.) |
+| Informational notice | -15 | Contains license expiration, renewal notices, "will expire soon", "notification", etc. |
 | Has unsubscribe | -40 | Contains unsubscribe link (strong bulk indicator) |
 
 ### Score Examples
@@ -511,6 +545,8 @@ By default, the tool auto-detects which email client is available:
 2. Falls back to Outlook if Apple Mail is not found
 3. Use `--client apple-mail` or `--client outlook` to force a specific client
 
+**Note:** Apple Mail's database is typically more up-to-date than Outlook's local cache. Outlook may take time to sync recent emails to its local SQLite database.
+
 ### What Data Is Accessed
 
 Both databases provide:
@@ -529,13 +565,24 @@ The tool uses SQLite's `mode=ro` (read-only) flag to ensure:
 - No locks that could interfere with Apple Mail
 - No risk of corruption
 
-### .emlx Preview Extraction
+### Email Content Extraction
 
-For the `--why` flag, the tool may read `.emlx` files to extract body previews:
-- Only reads first ~300 characters
+For better scoring accuracy, the tool extracts email content:
+- **Apple Mail**: Reads `.emlx` files to extract body previews (~500 characters)
+- **Outlook**: Uses `Message_Preview` field from the database
 - Strips signatures and quoted replies
 - Ignores attachments
-- Fails gracefully if file is missing
+- Fails gracefully if content is unavailable
+
+### Opening Emails in Email Client
+
+Use the `--open` flag to open emails directly in your email client:
+
+- **Interactive selection**: `--open` (shows menu to choose)
+- **Direct index**: `--open 3` (opens the 3rd email)
+- **Choose client**: `--open-client outlook` (defaults to apple-mail)
+
+The tool uses AppleScript to search for and open emails by subject line in the specified email client.
 
 ---
 
@@ -552,9 +599,11 @@ scoring.py            - Weighted signal scoring (WSS)
 classifier.py         - Score-to-category mapping
 cli.py                - Argparse and output formatting
 main.py               - Application entry point
-analyze_emails.py     - Email pattern analysis tool
+analyze_emails.py     - Email pattern analysis tool (supports both clients)
 analyze_and_update.py - Automated rule updates based on analysis
 read_email.py         - Read full email content for debugging
+open_email.py         - Open emails in email client (Apple Mail/Outlook)
+email_selector.py     - Interactive email selection menu
 ```
 
 No frameworks, no external dependencies—just clear, deterministic Python code.
@@ -622,11 +671,14 @@ This tool applies accounting principles to email management:
 Use the analysis script to understand your email patterns and get recommendations:
 
 ```bash
-# Analyze last 30 days of emails
-python3 analyze_emails.py --since 30
+# Analyze Apple Mail emails from last 30 days
+python3 analyze_emails.py --client apple-mail --since 30
 
-# Analyze all emails
-python3 analyze_emails.py --all
+# Analyze Outlook emails (all available)
+python3 analyze_emails.py --client outlook --all
+
+# Analyze specific account
+python3 analyze_emails.py --client apple-mail --account "your@email.com" --since 30
 
 # Automatically update rules based on analysis
 python3 analyze_and_update.py --since 30
