@@ -1,24 +1,74 @@
 # macOS Apple Mail Accounting & Categorization CLI
 
-A local, deterministic command-line tool for email accounting and triage on macOS. This tool treats emails as records to be accounted for, not messages to be read.
+> **Treat email as records to be accounted for, not messages to be read.**
+
+A local, deterministic command-line tool for email accounting and triage on macOS. Built specifically for users with multiple email accounts (personal + work) who need fast, explainable email classification without AI or external services.
+
+## Quick Start
+
+```bash
+# List your 20 most recent emails
+python3 main.py
+
+# Discover your email accounts (Exchange, iCloud, etc.)
+python3 main.py --list-accounts
+
+# Show ACTION items from Exchange account only
+python3 main.py --account Exchange --category ACTION
+
+# Show scoring breakdown
+python3 main.py --limit 10 --why
+```
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Usage](#usage)
+  - [Command-Line Options](#command-line-options)
+  - [Example Commands](#example-commands)
+- [Expected Output](#expected-output)
+- [Multiple Email Accounts Support](#multiple-email-accounts-support)
+- [Scoring System (WSS)](#scoring-system-weighted-signal-scoring-wss)
+- [Classification Rules](#classification-rules)
+- [How It Works](#how-it-works-apple-mail-envelope-index)
+- [Architecture](#architecture)
+- [Customization](#customization)
+- [Troubleshooting](#troubleshooting)
+- [FAQ](#faq)
+
+---
 
 ## Overview
 
-This CLI application reads Apple Mail's internal SQLite database (Envelope Index) to perform fast, indexed email analysis. It scores emails using transparent weighted signals and classifies them into actionable categories without using AI, external APIs, or modifying any data.
+This CLI application reads Apple Mail's internal SQLite database (Envelope Index) to perform fast, indexed email analysis. It scores emails using transparent weighted signals and classifies them into actionable categories.
 
-**What it does:**
-- ✅ Read-only access to Apple Mail metadata
-- ✅ Deterministic scoring based on explicit signals
-- ✅ Classify emails as ACTION / FYI / IGNORE
-- ✅ Display results in ledger-style accounting format
-- ✅ Explainable behavior with `--why` flag
+### What it does
 
-**What it does NOT do:**
+- ✅ **Read-only access** to Apple Mail metadata (never modifies emails)
+- ✅ **Deterministic scoring** based on explicit, auditable signals
+- ✅ **Multi-account support** (Exchange, iCloud, Gmail, etc.)
+- ✅ **Fast queries** using SQLite indexes (thousands of emails in seconds)
+- ✅ **Ledger-style output** for accounting-based email triage
+- ✅ **Explainable results** with `--why` flag showing score breakdowns
+- ✅ **Zero dependencies** (uses Python standard library only)
+
+### What it does NOT do
+
 - ❌ Send emails or modify mailboxes
 - ❌ Use AI/GPT or external services
-- ❌ Run as background service
+- ❌ Run as background service or daemon
 - ❌ Make network calls
-- ❌ Parse full email bodies (only lightweight previews)
+- ❌ Parse full email bodies (only lightweight ~300 char previews)
+
+### Key Benefits
+
+1. **Multiple Account Support**: Perfect for users with personal + work email
+2. **Transparent Scoring**: Every classification decision is explainable
+3. **No Black Box**: No machine learning, no AI—just clear rules
+4. **Privacy First**: 100% local processing, zero data leaves your machine
+5. **Performance**: Direct SQLite access is 10-100x faster than AppleScript
 
 ---
 
@@ -121,26 +171,33 @@ python3 main.py --category IGNORE --limit 100
 
 ## Expected Output
 
-### Standard Output (Ledger View)
+### Standard Ledger View
 
+When you run the basic command, you'll see a tabular ledger-style output:
+
+```bash
+python3 main.py --account Exchange --limit 10
+```
+
+**Output:**
 ```
 Locating Apple Mail Envelope Index...
-Querying messages (limit=20)...
-Found 20 messages.
+Querying messages (limit=10, account=Exchange)...
+Found 10 messages.
 Scoring and classifying...
 
 DATE        | FROM               | SUBJECT                  | SCORE | CLASS   | MAILBOX
 -------------------------------------------------------------------------------------------------
-2025-01-10  | partner.com        | DMC vs Azure Migrate     | 72    | ACTION  | Inbox
-2025-01-10  | client.net         | Question about timeline? | 65    | ACTION  | Inbox
-2025-01-09  | team.internal      | RE: Project update       | 50    | FYI     | Work
-2025-01-09  | github.com         | Weekly digest            | 15    | IGNORE  | Notifications
-2025-01-08  | noreply.service    | Your subscription        | 8     | IGNORE  | Inbox
-2025-01-08  | colleague.com      | Can you review this?     | 70    | ACTION  | Inbox
-2025-01-07  | newsletter.co      | Monthly roundup          | 5     | IGNORE  | Newsletters
-2025-01-07  | boss.company       | Urgent: please advise    | 75    | ACTION  | Inbox
-2025-01-06  | support.vendor     | Ticket #12345 update     | 45    | FYI     | Support
-2025-01-06  | noreply.marketing  | Special offer inside     | 2     | IGNORE  | Promotions
+2025-01-10  | partner.com        | DMC vs Azure Migrate     | 72    | ACTION  | Exchange/Inbox
+2025-01-10  | client.net         | Question about timeline? | 65    | ACTION  | Exchange/Inbox
+2025-01-09  | team.internal      | RE: Project update       | 50    | FYI     | Exchange/Work
+2025-01-09  | github.com         | Weekly digest            | 15    | IGNORE  | Exchange/Notifications
+2025-01-08  | noreply.service    | Your subscription        | 8     | IGNORE  | Exchange/Inbox
+2025-01-08  | colleague.com      | Can you review this?     | 70    | ACTION  | Exchange/Inbox
+2025-01-07  | newsletter.co      | Monthly roundup          | 5     | IGNORE  | Exchange/Newsletters
+2025-01-07  | boss.company       | Urgent: please advise    | 75    | ACTION  | Exchange/Inbox
+2025-01-06  | support.vendor     | Ticket #12345 update     | 45    | FYI     | Exchange/Support
+2025-01-06  | noreply.marketing  | Special offer inside     | 2     | IGNORE  | Exchange/Promotions
 
 Summary:
   Total emails: 10
@@ -151,20 +208,67 @@ Summary:
 
 ### Output with Signal Explanations (`--why`)
 
-When you use the `--why` flag, each email includes its signal breakdown:
+Use the `--why` flag to see exactly how each email was scored:
 
+```bash
+python3 main.py --account Exchange --category ACTION --limit 3 --why
 ```
+
+**Output:**
+```
+Locating Apple Mail Envelope Index...
+Querying messages (limit=3, account=Exchange, category after filtering)...
+Found 15 messages.
+Scoring and classifying...
+
 DATE        | FROM               | SUBJECT                  | SCORE | CLASS   | MAILBOX
 -------------------------------------------------------------------------------------------------
-2025-01-10  | partner.com        | DMC vs Azure Migrate?    | 72    | ACTION  | Inbox
-  └─ Signals: direct_sender(+20), trusted_domain(+10), contains_question(+15), action_phrase(+20)
+2025-01-10  | partner.com        | DMC vs Azure Migrate?    | 72    | ACTION  | Exchange/Inbox
+  └─ Signals: direct_sender(+20), contains_question(+15), action_phrase(+20), trusted_domain(+10)
 
-2025-01-09  | noreply.service    | Weekly digest            | 12    | IGNORE  | Inbox
-  └─ Signals: bulk_sender(-30), newsletter_subject(-20), has_unsubscribe(-40)
+2025-01-09  | boss.company       | Urgent: please advise    | 75    | ACTION  | Exchange/Inbox
+  └─ Signals: direct_sender(+20), action_phrase(+20), trusted_domain(+10)
 
-2025-01-08  | colleague.com      | Can you review this?     | 70    | ACTION  | Inbox
+2025-01-08  | colleague.com      | Can you review this?     | 70    | ACTION  | Exchange/Inbox
   └─ Signals: direct_sender(+20), trusted_domain(+10), contains_question(+15), action_phrase(+20), mentions_name(+15)
+
+Summary:
+  Total emails: 3
+  ACTION:    3 (100.0%)
+  FYI:       0 (  0.0%)
+  IGNORE:    0 (  0.0%)
 ```
+
+### List Accounts Output
+
+```bash
+python3 main.py --list-accounts
+```
+
+**Output:**
+```
+Locating Apple Mail Envelope Index...
+Discovering accounts from mailbox paths...
+
+Available accounts (3):
+  - Exchange
+  - iCloud
+  - Gmail
+
+Use --account <name> to filter by account.
+Example: python main.py --account Exchange
+```
+
+### Understanding the Output Columns
+
+| Column | Description | Example |
+|--------|-------------|---------|
+| **DATE** | Date email was received | `2025-01-10` |
+| **FROM** | Sender domain or address | `partner.com` |
+| **SUBJECT** | Email subject (truncated to 35 chars) | `DMC vs Azure Migrate` |
+| **SCORE** | Weighted signal score (0-100) | `72` |
+| **CLASS** | Classification category | `ACTION`, `FYI`, or `IGNORE` |
+| **MAILBOX** | Mailbox path (truncated to 15 chars) | `Exchange/Inbox` |
 
 ---
 
