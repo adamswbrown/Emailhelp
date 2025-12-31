@@ -34,7 +34,7 @@ from actions.mark_done import DoneTracker
 class EmailTriageAPI:
     """Backend API for the email triage application."""
     
-    def __init__(self, client='auto', account='ews'):
+    def __init__(self, client='auto', account='Exchange'):
         """
         Initialize the API.
         
@@ -80,6 +80,7 @@ class EmailTriageAPI:
         Returns:
             JSON string of email list
         """
+        print(f"[API] get_emails called: account={account}, limit={limit}, since_days={since_days}", file=sys.stderr)
         try:
             if account is None:
                 account = self.account
@@ -93,7 +94,6 @@ class EmailTriageAPI:
             
             # Process and categorize
             emails = []
-            print(f"[API] Processing {len(messages)} messages...", file=sys.stderr)
             for msg in messages:
                 # Get email ID
                 email_id = msg.get('message_id') or msg.get('ROWID')
@@ -335,117 +335,6 @@ class EmailTriageAPI:
         return json.dumps({"body": body if body else ""})
 
 
-    
-    def run_evaluation(self, days: int = 60, limit: int = 500):
-        """
-        Run categorization evaluation on recent emails.
-        
-        Args:
-            days: Number of days to analyze
-            limit: Maximum emails to analyze
-            
-        Returns:
-            JSON with evaluation results and suggestions
-        """
-        from analyze_emails import analyze_emails
-        
-        try:
-            print(f"[API] Running evaluation: days={days}, limit={limit}", file=sys.stderr)
-            
-            # Run analysis
-            results = analyze_emails(
-                limit=limit,
-                since_days=days,
-                client=self.client if self.client != 'auto' else None,
-                account=self.account
-            )
-            
-            if not results:
-                return json.dumps({
-                    "success": False,
-                    "message": "No emails found to analyze"
-                })
-            
-            # Extract key metrics
-            total = results.get('total_emails', 0)
-            categories = results.get('category_distribution', {})
-            recommendations = results.get('recommendations', {})
-            
-            return json.dumps({
-                "success": True,
-                "total_emails": total,
-                "categories": {k: v for k, v in categories.items()},
-                "score_stats": {
-                    "average": recommendations.get('patterns_found', {}).get('average_score', 0),
-                    "range": list(recommendations.get('patterns_found', {}).get('score_range', [0, 0]))
-                },
-                "suggestions": {
-                    "trusted_domains": recommendations.get('trusted_domains', [])[:5],
-                    "threshold_adjustments": recommendations.get('threshold_adjustments', {}),
-                    "action_phrases": dict(list(results.get('action_phrases_in_content', {}).items())[:10]),
-                    "info_phrases": dict(list(results.get('informational_phrases_in_content', {}).items())[:10])
-                },
-                "patterns": recommendations.get('patterns_found', {})
-            })
-            
-        except Exception as e:
-            print(f"[API] Evaluation error: {e}", file=sys.stderr)
-            import traceback
-            traceback.print_exc(file=sys.stderr)
-            return json.dumps({
-                "success": False,
-                "message": f"Evaluation failed: {str(e)}"
-            })
-    
-    def get_current_thresholds(self):
-        """Get current categorization thresholds."""
-        return json.dumps({
-            "action_threshold": self.classifier.ACTION_THRESHOLD,
-            "fyi_threshold": self.classifier.FYI_THRESHOLD
-        })
-    
-    def apply_threshold_adjustment(self, new_action_threshold: int):
-        """
-        Apply new ACTION threshold (in-memory only).
-        
-        Args:
-            new_action_threshold: New threshold value (20-90)
-            
-        Returns:
-            JSON with result
-        """
-        try:
-            new_action_threshold = int(new_action_threshold)
-            
-            # Validate
-            if new_action_threshold < 20 or new_action_threshold > 90:
-                return json.dumps({
-                    "success": False,
-                    "message": "Threshold must be between 20 and 90"
-                })
-            
-            old_threshold = self.classifier.ACTION_THRESHOLD
-            
-            # Update in-memory
-            self.classifier.ACTION_THRESHOLD = new_action_threshold
-            self.classifier.FYI_THRESHOLD = max(10, new_action_threshold - 10)
-            
-            print(f"[API] Threshold updated: {old_threshold} -> {new_action_threshold}", file=sys.stderr)
-            
-            return json.dumps({
-                "success": True,
-                "old_threshold": old_threshold,
-                "new_threshold": new_action_threshold,
-                "message": f"Threshold updated! Refresh emails to see changes.",
-                "note": "This change is temporary until you restart the app."
-            })
-            
-        except Exception as e:
-            return json.dumps({
-                "success": False,
-                "message": str(e)
-            })
-
 def main():
     """Start the native macOS application."""
     import argparse
@@ -453,7 +342,7 @@ def main():
     parser = argparse.ArgumentParser(description='Email Triage Native App')
     parser.add_argument('--client', choices=['auto', 'apple-mail', 'outlook'], default='auto',
                         help='Email client to use')
-    parser.add_argument('--account', default='ews',
+    parser.add_argument('--account', default='Exchange',
                         help='Default account to filter')
     
     args = parser.parse_args()

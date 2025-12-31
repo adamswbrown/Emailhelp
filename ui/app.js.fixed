@@ -1,0 +1,34 @@
+// Add this at the end of app.js instead of DOMContentLoaded
+
+// Wait for both DOM and PyWebView to be ready
+let domReady = false;
+let pywebviewReady = false;
+
+function tryInit() {
+    if (domReady && pywebviewReady) {
+        console.log('Both DOM and PyWebView ready - initializing app...');
+        init();
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM ready');
+    domReady = true;
+    tryInit();
+});
+
+window.addEventListener('pywebviewready', function() {
+    console.log('PyWebView ready');
+    pywebviewReady = true;
+    tryInit();
+});
+
+// Fallback after 3 seconds
+setTimeout(function() {
+    if (!domReady || !pywebviewReady) {
+        console.warn('Timeout waiting for init, forcing...');
+        domReady = true;
+        pywebviewReady = true;
+        tryInit();
+    }
+}, 3000);

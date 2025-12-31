@@ -15,7 +15,6 @@
                 <span id="status-text" class="status-text">Loading...</span>
             </div>
             <div class="header-right">
-                <button onclick="runEvaluation()" class="btn-evaluate" title="Run categorization evaluation">📊 Evaluate</button>
                 <button onclick="refreshEmails()" class="btn-refresh">🔄 Refresh</button>
                 <div class="auto-refresh-toggle">
                     <label>
@@ -47,41 +46,6 @@
             <!-- Emails will be rendered here -->
         </div>
         
-        <!-- Evaluation modal -->
-        <div id="evaluation-modal" class="modal">
-            <div class="modal-content modal-large">
-                <div class="modal-header">
-                    <h2>📊 Categorization Evaluation</h2>
-                    <button class="close-btn" onclick="closeEvaluationModal()">&times;</button>
-                </div>
-                <div class="modal-body">
-                    <div id="evaluation-loading" class="loading-state" style="display: none;">
-                        <p>Running evaluation... This may take a minute.</p>
-                    </div>
-                    <div id="evaluation-results" class="evaluation-results">
-                        <!-- Results will be displayed here -->
-                    </div>
-                    <div class="threshold-controls" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd;">
-                        <h3>Adjust Thresholds</h3>
-                        <div class="threshold-item">
-                            <label>
-                                ACTION Threshold: <span id="current-action-threshold">30</span>
-                                <input type="range" id="action-threshold-slider" min="20" max="90" value="30" onchange="updateThresholdDisplay(this.value)" oninput="updateThresholdDisplay(this.value)">
-                                <span id="threshold-value-display">30</span>
-                            </label>
-                            <button onclick="applyThreshold()" class="btn-primary" style="margin-left: 10px;">Apply & Refresh</button>
-                        </div>
-                        <div class="threshold-info">
-                            <small>Current FYI threshold: <span id="current-fyi-threshold">20</span> (auto-adjusted)</small>
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-actions">
-                    <button onclick="closeEvaluationModal()" class="btn-secondary">Close</button>
-                </div>
-            </div>
-        </div>
-
         <!-- Reply modal -->
         <div id="reply-modal" class="modal">
             <div class="modal-content">
