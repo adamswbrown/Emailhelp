@@ -28,6 +28,8 @@ from scoring import EmailScorer
 from classifier import EmailClassifier
 from preview import EmailPreview
 from open_email import open_email
+from fast_content_extract import get_email_content_by_details
+from applescript_search import get_accounts as get_applescript_accounts
 
 
 class EmailTable(DataTable):
@@ -178,6 +180,7 @@ class EmailAccountingApp(App):
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("o", "open_email", "Open Email"),
+        Binding("c", "copy_content", "Copy Content"),
         Binding("r", "refresh", "Refresh"),
         Binding("f", "focus_filters", "Filters"),
         Binding("t", "focus_table", "Table"),
@@ -233,9 +236,10 @@ class EmailAccountingApp(App):
                     yield Checkbox("Show Signals", id="signals_checkbox", value=True)
                     yield Static("User Name:", classes="filter-group")
                     yield Input(placeholder="Your name (optional)", id="user_name_input", value=self.user_name or "")
-                    yield Button("Refresh", id="refresh_button", variant="primary")
+                    yield Button("Refresh (R)", id="refresh_button", variant="primary")
                     yield Button("Open Email (O)", id="open_button", variant="success")
-                    yield Button("List Accounts", id="list_accounts_button", variant="default")
+                    yield Button("Copy Content (C)", id="copy_button", variant="success")
+                    yield Button("List Accounts (L)", id="list_accounts_button", variant="default")
         
         with Horizontal():
             yield EmailTable([], id="email_table")
@@ -663,6 +667,8 @@ class EmailAccountingApp(App):
             self.action_refresh()
         elif event.button.id == "open_button":
             self.action_open_email()
+        elif event.button.id == "copy_button":
+            self.action_copy_content()
         elif event.button.id == "list_accounts_button":
             self.action_list_accounts()
     
@@ -727,6 +733,92 @@ class EmailAccountingApp(App):
             self.notify(f"Available accounts:\n{accounts_str}", severity="information", timeout=10)
         else:
             self.notify("No accounts found. Try refreshing.", severity="warning")
+    
+    def action_copy_content(self) -> None:
+        """Copy the selected email's content to clipboard."""
+        import subprocess
+        
+        table = self.query_one("#email_table", EmailTable)
+        
+        if not self.filtered_emails:
+            self.notify("No emails to copy", severity="warning")
+            return
+        
+        # Get the currently highlighted row
+        try:
+            cursor_row = table.cursor_row
+            if cursor_row is not None and 0 <= cursor_row < len(self.filtered_emails):
+                idx = cursor_row
+            else:
+                idx = 0
+        except:
+            idx = 0
+        
+        email = self.filtered_emails[idx]
+        subject = email.get('subject', '')
+        sender = email.get('sender', '')
+        mailbox = email.get('mailbox', '')
+        
+        if not subject or not sender:
+            self.notify("Cannot copy: missing email details", severity="error")
+            return
+        
+        # Determine account
+        account = email.get('account', '')
+        if not account:
+            # Try to extract from mailbox URL
+            if mailbox and '://' in mailbox:
+                url_protocol = mailbox.split('://')[0].lower()
+                # Map protocols to account names
+                try:
+                    applescript_accounts = get_applescript_accounts()
+                    if url_protocol == 'ews' and 'Exchange' in applescript_accounts:
+                        account = 'Exchange'
+                    elif applescript_accounts:
+                        account = applescript_accounts[0]
+                except:
+                    pass
+        
+        if not account:
+            self.notify("Cannot copy: account not found", severity="error")
+            return
+        
+        self.notify(f"Extracting content from {account}...", severity="information")
+        
+        try:
+            # Use fast targeted extraction
+            mailbox_name = "INBOX"
+            if mailbox and '://' not in mailbox:
+                mailbox_name = mailbox
+            
+            content = get_email_content_by_details(
+                account=account,
+                subject=subject,
+                sender=sender,
+                mailbox=mailbox_name,
+                timeout=30
+            )
+            
+            if not content:
+                self.notify("Could not extract email content (try opening email instead)", severity="warning")
+                return
+            
+            # Copy to clipboard using pbcopy
+            process = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE, text=True)
+            process.communicate(input=content)
+            process.wait()
+            
+            if process.returncode == 0:
+                subject_short = subject[:50] + "..." if len(subject) > 50 else subject
+                self.notify(f"✓ Content copied to clipboard: {subject_short}", severity="success", timeout=5)
+            else:
+                self.notify("Failed to copy to clipboard", severity="error")
+                
+        except Exception as e:
+            self.notify(f"Error copying content: {str(e)}", severity="error")
+            import traceback
+            print(f"Error copying content: {e}", file=sys.stderr)
+            print(traceback.format_exc(), file=sys.stderr)
     
     def action_toggle_signals(self) -> None:
         """Toggle signal display."""

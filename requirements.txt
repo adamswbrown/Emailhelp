@@ -1,11 +1,8 @@
-# macOS Apple Mail Accounting CLI - Dependencies
-#
-# This tool has minimal dependencies - uses only Python standard library
-# for deterministic, transparent operation.
+# macOS Email Accounting CLI & Native App - Dependencies
 #
 # Python 3.7+ required
 #
-# Standard library modules used:
+# Standard library modules used (no pip install needed):
 # - sqlite3 (built-in)
 # - email (built-in)
 # - argparse (built-in)
@@ -13,7 +10,10 @@
 # - re (built-in)
 # - datetime (built-in)
 #
-# No external packages required for core functionality.
+# Optional dependency for native macOS app:
+pywebview>=4.0  # For native window application (main_app.py)
 #
-# Optional: Textual for TUI interface
-textual>=0.40.0
+# Install with: pip3 install pywebview
+#
+# Note: Core CLI functionality (main.py) has NO external dependencies.
+# PyWebView is only required for the native GUI app (main_app.py).
