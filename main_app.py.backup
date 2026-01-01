@@ -111,40 +111,15 @@ class EmailTriageAPI:
                 preview = ''
                 preview_display = 'No preview available'
                 
-                # Try to get preview from .emlx file first (fastest)
-                message_id = msg.get('message_id') or msg.get('ROWID')
-                if message_id and not preview:
-                    try:
-                        from pathlib import Path
-                        mail_dir = Path.home() / "Library" / "Mail"
-                        if mail_dir.exists():
-                            # Search for .emlx file
-                            for v_dir in sorted(mail_dir.glob("V*"), reverse=True):
-                                for emlx_file in v_dir.rglob(f"{message_id}.emlx"):
-                                    try:
-                                        m = emlx.read(str(emlx_file))
-                                        preview = m.text or ''
-                                        if not preview and m.html:
-                                            import re
-                                            preview = re.sub(r'<[^>]+>', '', m.html)
-                                        if preview:
-                                            preview = ' '.join(preview.split())
-                                            preview_display = preview[:300] + '...' if len(preview) > 300 else preview
-                                            break
-                                    except Exception:
-                                        pass
-                                if preview:
-                                    break
-                    except Exception:
-                        pass
-                
-                # Fallback to AppleScript if emlx didn't work
-                if not preview and sender and subject:
+                if sender and subject:
                     try:
                         from fast_content_extract import get_email_content_by_details
+                        # Map account name for AppleScript
                         applescript_account = account if account else self.account
                         account_map = {'ews': 'Exchange', 'EWS': 'Exchange'}
                         applescript_account = account_map.get(applescript_account, applescript_account)
+                        
+                        # Get quick preview (first 300 chars) with short timeout
                         full_content = get_email_content_by_details(
                             account=applescript_account,
                             subject=subject,
@@ -152,6 +127,7 @@ class EmailTriageAPI:
                             mailbox='INBOX',
                             timeout=3
                         )
+                        
                         if full_content:
                             import re
                             preview = re.sub(r'<[^>]+>', '', full_content)
@@ -159,13 +135,3 @@ class EmailTriageAPI:
                             preview_display = preview[:300] + '...' if len(preview) > 300 else preview
                     except Exception:
                         pass
-        except Exception as e:
-            print(f"[API] Error getting emails: {e}", file=sys.stderr)
-            import traceback
-            traceback.print_exc(file=sys.stderr)
-            return json.dumps({"error": str(e)})
-
-            # Sort by date (newest first)
-            emails.sort(key=lambda x: x['date'], reverse=True)
-
-            return json.dumps(emails)

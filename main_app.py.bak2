@@ -168,7 +168,7 @@ class EmailTriageAPI:
                     'score': score,
                     'category': category,
                     'signals': signals,
-                    'preview': preview[:200] if preview else 'No preview available',
+                    'preview': preview_display if 'preview_display' in locals() else (preview[:200] if preview else 'No preview available'),
                     'mailbox': msg.get('mailbox', ''),
                     'read': msg.get('read', 1) == 1
                 })
